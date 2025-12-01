@@ -100,7 +100,7 @@ void tensor_fill(Tensor* t, double value) {
         tensor_fill_cuda(t, value);
 }
 
-void tensor_fill_random(Tensor* t, float min_val, float max_val) {
+void tensor_fill_random_cpu(Tensor* t, float min_val, float max_val) {
     int64_t n = tensor_numel(t);
 
     if (t->dtype == FLOAT32) {
@@ -122,6 +122,22 @@ void tensor_fill_random(Tensor* t, float min_val, float max_val) {
         for (int64_t i = 0; i < n; i++) {
             d[i] = min_val + rand() % ((int)(max_val - min_val + 1));
         }
+    }
+}
+
+void tensor_fill_random(Tensor* t,  float min_val, float max_val) {
+    if (!t) return;
+
+    switch (t->device) {
+        case CPU:
+            tensor_fill_random_cpu(t, min_val, max_val);
+            break;
+        case CUDA:
+            tensor_fill_random_cuda(t, min_val, max_val);
+            break;
+        default:
+            fprintf(stderr, "tensor_fill_random: unknown device\n");
+            break;
     }
 }
 
@@ -147,37 +163,43 @@ void tensor_free(Tensor* t) {
     }
 }
 
+#define MAX_PRINT 5  // maximum elements per dimension to print
+
 void tensor_print_recursive(const Tensor* t, int dim, int64_t offset) {
-    // Base case: print a single element
     if (dim == t->ndim) {
+        // Base case: print a single element
         if (t->dtype == FLOAT32)
             printf("%6.2f", ((float*)t->data)[offset]);
-        else if (t->dtype == FLOAT32)
-            printf("%6.2lf", ((double*)t->data)[offset]);
         else if (t->dtype == INT32)
             printf("%6d", ((int*)t->data)[offset]);
         return;
     }
 
     printf("[");
-    for (int64_t i = 0; i < t->shape[dim]; i++) {
+    int64_t limit = t->shape[dim];
 
-        // Pretty formatting: new line for each row (dim > 0)
-        if (dim == t->ndim - 1) {
-            // last dim -> elements on same line
-        } else {
-            if (i > 0) printf("\n ");
+    for (int64_t i = 0; i < limit; i++) {
+        // for large dimensions, skip middle elements
+        if (limit > MAX_PRINT * 2 && i == MAX_PRINT) {
+            printf(" ... ");
+            i = limit - MAX_PRINT;
         }
+
+        // new line for higher dims
+        if (dim < t->ndim - 1 && i > 0)
+            printf("\n ");
 
         tensor_print_recursive(t, dim + 1, offset + i * t->stride[dim]);
 
-        if (i < t->shape[dim] - 1)
-            printf(", ");
+        if (i < limit - 1) printf(", ");
     }
     printf("]");
 }
 
 void tensor_print(const Tensor* t) {
+    const Tensor* to_print = t;
+    Tensor* tmp = NULL;
+
     printf("Tensor(");
     for (int i = 0; i < t->ndim; i++) {
         printf("%" PRId64, t->shape[i]);
@@ -185,6 +207,25 @@ void tensor_print(const Tensor* t) {
     }
     printf(")\n");
 
-    tensor_print_recursive(t, 0, 0);
+    // If the tensor is on CUDA make a CPU copy
+    if (t->device == CUDA) {
+        tmp = tensor_to_cpu(t);
+        to_print = tmp;
+    }
+
+    tensor_print_recursive(to_print, 0, 0);
     printf("\n");
+
+    if (tmp != NULL) {
+        tensor_free(tmp);
+    }
+}
+
+void tensor_print_shape(const Tensor* t) { // make copy to cpu if on gpu
+    printf("Tensor(");
+    for (int i = 0; i < t->ndim; i++) {
+        printf("%" PRId64, t->shape[i]);
+        if (i < t->ndim - 1) printf(", ");
+    }
+    printf(")\n");
 }

@@ -38,24 +38,49 @@ void tensor_free_cuda(Tensor* t) {
     free(t);
 }
 
-Tensor* tensor_to_cuda(const Tensor* cpu_tensor) {
-    Tensor* gpu_tensor = tensor_create_cuda(cpu_tensor->ndim, cpu_tensor->shape, cpu_tensor->dtype);
+Tensor* tensor_to_cpu(const Tensor* src) {
+    Tensor* cpu_tensor = tensor_create(src->ndim, src->shape, src->dtype, CPU);
 
-    int64_t numel = tensor_numel(cpu_tensor);
-    size_t bytes = numel * dtype_size(cpu_tensor->dtype);
-    cudaMemcpy(gpu_tensor->data, cpu_tensor->data, bytes, cudaMemcpyHostToDevice);
+    int64_t numel = tensor_numel(src);
+    size_t bytes = numel * dtype_size(src->dtype);
 
-    return gpu_tensor;
-}
-
-Tensor* tensor_to_cpu(const Tensor* gpu_tensor) {
-    Tensor* cpu_tensor = tensor_create(gpu_tensor->ndim, gpu_tensor->shape, gpu_tensor->dtype, CPU);
-
-    int64_t numel = tensor_numel(gpu_tensor);
-    size_t bytes = numel * dtype_size(gpu_tensor->dtype);
-    cudaMemcpy(cpu_tensor->data, gpu_tensor->data, bytes, cudaMemcpyDeviceToHost);
+    if (src->device == CPU) {
+        // Source already on CPU, just copy memory
+        memcpy(cpu_tensor->data, src->data, bytes);
+    } else if (src->device == CUDA) {
+        // Copy from GPU to CPU
+        cudaError_t err = cudaMemcpy(cpu_tensor->data, src->data, bytes, cudaMemcpyDeviceToHost);
+        if (err != cudaSuccess) {
+            printf("cudaMemcpy error: %s\n", cudaGetErrorString(err));
+        }
+    } else {
+        printf("Unknown device in tensor_to_cpu\n");
+    }
 
     return cpu_tensor;
+}
+
+Tensor* tensor_to_cuda(const Tensor* src) {
+    // Create a new GPU tensor
+    Tensor* gpu_tensor = tensor_create(src->ndim, src->shape, src->dtype, CUDA);
+
+    int64_t numel = tensor_numel(src);
+    size_t bytes = numel * dtype_size(src->dtype);
+
+    if (src->device == CUDA) {
+        // Source already on GPU, just copy memory
+        cudaMemcpy(gpu_tensor->data, src->data, bytes, cudaMemcpyDeviceToDevice);
+    } else if (src->device == CPU) {
+        // Copy from CPU to GPU
+        cudaError_t err = cudaMemcpy(gpu_tensor->data, src->data, bytes, cudaMemcpyHostToDevice);
+        if (err != cudaSuccess) {
+            printf("cudaMemcpy error: %s\n", cudaGetErrorString(err));
+        }
+    } else {
+        printf("Unknown device in tensor_to_cuda\n");
+    }
+
+    return gpu_tensor;
 }
 
 __global__ void fill_kernel(float* data, int64_t total, float value) {
@@ -95,7 +120,45 @@ Tensor* tensor_create_scalar_cuda(TensorType dtype) {
     return t;
 }
 
+__global__ void tensor_fill_random_kernel(float* data, float* rnd, int64_t n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        data[idx] = rnd[idx];
+    }
+}
 
+void tensor_fill_random_cuda(Tensor* t, float min_val, float max_val) {
+    int64_t n = tensor_numel(t);
+
+    // 1) Allocate temporary host buffer
+    float* h_tmp = (float*)malloc(n * sizeof(float));
+
+    // 2) Fill host buffer with random numbers
+    for (int64_t i = 0; i < n; i++) {
+        float r = (float)rand() / (float)RAND_MAX;
+        h_tmp[i] = min_val + r * (max_val - min_val);
+    }
+
+    // 3) Allocate GPU buffer for random values
+    float* d_tmp;
+    cudaMalloc((void**)&d_tmp, n * sizeof(float));
+
+    // 4) Copy random values to GPU
+    cudaMemcpy(d_tmp, h_tmp, n * sizeof(float), cudaMemcpyHostToDevice);
+
+    // 5) Launch kernel to copy into final tensor
+    float* d_data = (float*)t->data;
+
+    int threads = 256;
+    int blocks = (n + threads - 1) / threads;
+
+    tensor_fill_random_kernel<<<blocks, threads>>>(d_data, d_tmp, n);
+    cudaDeviceSynchronize();
+
+    // 6) Free temporary buffers
+    cudaFree(d_tmp);
+    free(h_tmp);
+}
 
 #ifdef __cplusplus
 }

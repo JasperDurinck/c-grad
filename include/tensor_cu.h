@@ -13,6 +13,7 @@ Tensor* tensor_to_cpu(const Tensor* gpu_tensor);
 void tensor_free_cuda(Tensor* t);
 void tensor_fill_cuda(Tensor* t, double value);
 Tensor* tensor_create_scalar_cuda(TensorType dtype);
+void tensor_fill_random_cuda(Tensor* t, float min_val, float max_val);
 
 #ifdef __cplusplus
 }

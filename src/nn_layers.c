@@ -1,5 +1,7 @@
 #include "../include/nn_layers.h"
+#include "../include/nn_layers_cu.h"
 #include "../include/tensor.h"
+#include "../include/tensor_cu.h"
 #include "../include/tensor_ops.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -8,7 +10,7 @@
 
 // ---------------------- Linear layer CPU functions ----------------------
 
-void linear_layer_fn_cpu(Layer* layer, Tensor* input) {
+void linear_layer_forward(Layer* layer, Tensor* input) {
     layer->input = input;
 
     Tensor* W = layer->weights[0];
@@ -27,8 +29,7 @@ void linear_layer_fn_cpu(Layer* layer, Tensor* input) {
     tensor_add_bias(layer->output, b, layer->output);
 }
 
-
-void linear_layer_fn_grad_cpu(Layer* layer, Tensor* grad_output) {
+void linear_layer_backward(Layer* layer, Tensor* grad_output) {
     if (!layer || !layer->input || !grad_output) {
         fprintf(stderr, "ERROR: linear_backward called with NULL pointers!\n");
         exit(1);
@@ -43,65 +44,27 @@ void linear_layer_fn_grad_cpu(Layer* layer, Tensor* grad_output) {
         layer->grad_input = tensor_create(X->ndim, X->shape, X->dtype, X->device);
     }
 
-    // Allocate grad for weights if not allocated 
+    // allocate grad for weights if not allocated 
     if (!W->grad) W->grad = tensor_create(W->ndim, W->shape, W->dtype, W->device);
     if (!b->grad) b->grad = tensor_create(b->ndim, b->shape, b->dtype, b->device);
 
-    switch (X->device) {
-        case CPU: {
-            // grad_input = grad_output @ W^T
-            Tensor* W_T = tensor_create(2, (int64_t[]){W->shape[1], W->shape[0]}, W->dtype, CPU);
-            tensor_transpose(W, W_T);
-            tensor_matmul(grad_output, W_T, layer->grad_input);
-            tensor_free(W_T);
+    Tensor* W_T = tensor_create(2, (int64_t[]){W->shape[1], W->shape[0]}, W->dtype, W->device);
+    tensor_transpose(W, W_T);
+    tensor_matmul(grad_output, W_T, layer->grad_input);
+    tensor_free(W_T);
 
-            // W->grad = X^T @ grad_output
-            Tensor* X_T = tensor_create(2, (int64_t[]){X->shape[1], X->shape[0]}, X->dtype, CPU);
-            tensor_transpose(X, X_T);
-            tensor_matmul(X_T, grad_output, W->grad);
-            tensor_free(X_T);
+    // W->grad = X^T @ grad_output
+    Tensor* X_T = tensor_create(2, (int64_t[]){X->shape[1], X->shape[0]}, X->dtype, W->device);
+    tensor_transpose(X, X_T);
+    tensor_matmul(X_T, grad_output, W->grad);
+    tensor_free(X_T);
 
-            // b->grad = sum over batch dimensions
-            tensor_sum_axis(grad_output, 0, b->grad);
+    // b->grad = sum over batch dimensions
+    tensor_sum_axis(grad_output, 0, b->grad);
 
-            break;
-        }
-
-        case CUDA:
-            // #TODO implement CUDA version for linear_layer_fn_grad
-            fprintf(stderr, "linear_backward CUDA not implemented yet!\n");
-            exit(1);
-            break;
-
-        default:
-            fprintf(stderr, "linear_backward: unknown device!\n");
-            exit(1);
-    }
-}
-
-// ---------------------- TODO placeholders for switch functions ----------------------
-
-void linear_layer_forward(Layer* layer, Tensor* input) {
-    // #TODO: implement device switch
-    // For now: CPU only
-    linear_layer_fn_cpu(layer, input);
-}
-
-void linear_layer_backward(Layer* layer, Tensor* grad_output) {
-    // #TODO: implement device switch
-    // For now: CPU only
-    linear_layer_fn_grad_cpu(layer, grad_output);
 }
 
 Layer* create_linear_layer(int in_features, int out_features, Device dev) {
-    // #TODO: implement device switch for CUDA when ready
-    // For now: CPU only
-    return create_linear_layer_cpu(in_features, out_features, dev);
-}
-
-// ---------------------- CPU-only Layer creation ----------------------
-
-Layer* create_linear_layer_cpu(int in_features, int out_features, Device dev) {
     Layer* layer = (Layer*)malloc(sizeof(Layer));
     layer->input  = NULL;
     layer->output = NULL;
@@ -120,14 +83,10 @@ Layer* create_linear_layer_cpu(int in_features, int out_features, Device dev) {
     layer->weights[1] = tensor_create(1, b_shape, FLOAT32, dev);
     tensor_fill(layer->weights[1], 0.0f);
 
-    layer->forward  = linear_layer_forward;   // CPU for now, will switch later
-    layer->backward = linear_layer_backward;  // CPU for now, will switch later
+    layer->forward  = linear_layer_forward;   
+    layer->backward = linear_layer_backward;  
     return layer;
 }
-
-
-
-// CPU forward
 
 void relu_layer_fn_cpu(Layer* layer, Tensor* input) {
     layer->input = input;
@@ -145,7 +104,6 @@ void relu_layer_fn_cpu(Layer* layer, Tensor* input) {
     }
 }
 
-// CPU backward
 void relu_layer_fn_grad_cpu(Layer* layer, Tensor* grad_output) {
     if (!layer->input) {
         fprintf(stderr, "ReLU backward called without forward input!\n");
@@ -168,7 +126,6 @@ void relu_layer_fn_grad_cpu(Layer* layer, Tensor* grad_output) {
     }
 }
 
-
 // Forward/backward wrappers
 void relu_forward(Layer* layer, Tensor* input) {
     switch (input->device) {
@@ -176,7 +133,7 @@ void relu_forward(Layer* layer, Tensor* input) {
             relu_layer_fn_cpu(layer, input);
             break;
         case CUDA:
-            //tensor_relu_cuda(input, layer->output);  // placeholder for future CUDA
+            relu_layer_fn_cuda(layer, input);
             break;
         default:
             fprintf(stderr, "relu_forward: unknown device!\n");
@@ -190,7 +147,7 @@ void relu_backward(Layer* layer, Tensor* grad_output) {
             relu_layer_fn_grad_cpu(layer, grad_output);
             break;
         case CUDA:
-            //tensor_relu_backward_cuda(grad_output, layer->input, layer->grad_input); // placeholder
+            relu_layer_fn_grad_cuda(layer, grad_output);
             break;
         default:
             fprintf(stderr, "relu_backward: unknown device!\n");

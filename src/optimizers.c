@@ -1,7 +1,9 @@
 #include "../include/nn_layers.h"
 #include "../include/tensor.h"
 #include "../include/optimizers.h"
+#include "../include/optimizers_cu.h"
 #include <math.h>
+#include <stdio.h>
 
 void optimizer_step(Optimizer* opt, float lr) {
     if (opt && opt->update_fn) {
@@ -9,7 +11,7 @@ void optimizer_step(Optimizer* opt, float lr) {
     }
 }
 
-void sgd_update_optimizer(Optimizer* opt, float lr) {
+void sgd_update_optimizer_cpu(Optimizer* opt, float lr) {
     for (int i = 0; i < opt->n_layers; i++) {
         Layer* layer = opt->layers[i];
         for (int w = 0; w < layer->n_weights; w++) {
@@ -27,6 +29,20 @@ void sgd_update_optimizer(Optimizer* opt, float lr) {
                 w_data[j] -= lr * g_data[j];
             }
         }
+    }
+}
+
+void sgd_update_optimizer(Optimizer* opt, float lr) {
+    switch (opt->layers[0]->input->device) {
+        case CPU:
+            sgd_update_optimizer_cpu(opt, lr);
+            break;
+        case CUDA:
+            sgd_update_optimizer_cuda(opt,lr);
+            break;
+        default:
+            fprintf(stderr, "sgd_update_optimizer: unsupported device\n");
+            exit(1);
     }
 }
 

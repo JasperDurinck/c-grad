@@ -221,7 +221,7 @@ void tensor_sum_axis(const Tensor* a, int axis, Tensor* out){
             tensor_sum_axis_cpu(a, axis, out);
             break;
         case CUDA:
-            //tensor_sum_cuda(a, out);
+            tensor_sum_axis_cuda(a, axis, out);
             break;
         default:
             fprintf(stderr, "tensor_sum: unsupported device\n");

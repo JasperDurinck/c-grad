@@ -88,41 +88,53 @@ void tensor_div_cuda(const Tensor* a, const Tensor* b, Tensor* out) {
     cudaDeviceSynchronize();
 }
 
-// Simple batched matmul kernel (assumes float32)
-__global__ void tensor_matmul_kernel(const float* A, const float* B, float* C,
-                                     int batch, int M, int K, int N) {
-    int b = blockIdx.z;      // batch index
+
+// Batched matmul kernel for float32 tensors
+// Supports both 2D (batch x K) and 3D (batch x M x K) inputs
+__global__ void tensor_matmul_kernel_generic(const float* A, const float* B, float* C,
+                                             int batch, int M, int K, int N,
+                                             int B_has_batch) {
+    int b = blockIdx.z;                           // batch index
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (b < batch && row < M && col < N) {
         float sum = 0.0f;
         for (int k = 0; k < K; k++) {
-            sum += A[b*M*K + row*K + k] * B[b*K*N + k*N + col];
+            // If B has batch dimension, index like 3D, otherwise like 2D
+            float b_val = B_has_batch ? B[b*K*N + k*N + col] : B[k*N + col];
+            sum += A[b*M*K + row*K + k] * b_val;
         }
         C[b*M*N + row*N + col] = sum;
     }
 }
 
+// Wrapper to launch CUDA kernel
 void tensor_matmul_cuda(const Tensor* A, const Tensor* B, Tensor* out) {
+    // Determine shapes
     int batch = A->shape[0];
-    int M = A->shape[1];
-    int K = A->shape[2];
-    int N = B->shape[2];
+    int M = (A->ndim == 3) ? A->shape[1] : 1;
+    int K = (A->ndim == 3) ? A->shape[2] : A->shape[1];
+    int N = (B->ndim == 3) ? B->shape[2] : B->shape[1];
 
-    float *d_A = (float*)A->data;
-    float *d_B = (float*)B->data;
-    float *d_out = (float*)out->data;
+    int B_has_batch = (B->ndim == 3) ? 1 : 0;
 
-    dim3 threadsPerBlock(16, 16);
+    float* d_A = (float*)A->data;
+    float* d_B = (float*)B->data;
+    float* d_out = (float*)out->data;
+
+    // Thread/block configuration
+    dim3 threadsPerBlock(16, 16, 1);
     dim3 numBlocks((N + threadsPerBlock.x - 1) / threadsPerBlock.x,
                    (M + threadsPerBlock.y - 1) / threadsPerBlock.y,
                    batch);
 
-    tensor_matmul_kernel<<<numBlocks, threadsPerBlock>>>(d_A, d_B, d_out, batch, M, K, N);
+    tensor_matmul_kernel_generic<<<numBlocks, threadsPerBlock>>>(
+        d_A, d_B, d_out, batch, M, K, N, B_has_batch
+    );
+
     cudaDeviceSynchronize();
 }
-
 
 __global__ void tensor_transpose_kernel(
     const float* A, float* B,
@@ -411,6 +423,65 @@ void tensor_add_bias_cuda(const Tensor* input, const Tensor* bias, Tensor* out) 
     cudaDeviceSynchronize();
 }
 
+
+__global__ void tensor_sum_axis0_kernel(const float* __restrict__ a,
+                                        float* __restrict__ out,
+                                        int64_t N, int64_t M)
+{
+    // One thread per feature index j in [0, M)
+    int j = blockIdx.x * blockDim.x + threadIdx.x;
+    if (j >= M) return;
+
+    float sum = 0.0f;
+    for (int64_t i = 0; i < N; i++) {
+        sum += a[i * M + j];
+    }
+    out[j] = sum;
+}
+
+__global__ void tensor_sum_axis1_kernel(const float* __restrict__ a,
+                                        float* __restrict__ out,
+                                        int64_t N, int64_t M)
+{
+    // One thread per batch index i in [0, N)
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+
+    float sum = 0.0f;
+    const float* row = a + i * M;
+    for (int64_t j = 0; j < M; j++) {
+        sum += row[j];
+    }
+    out[i] = sum;
+}
+
+void tensor_sum_axis_cuda(const Tensor* a, int axis, Tensor* out)
+{
+    int64_t N = a->shape[0];
+    int64_t M = a->shape[1];
+
+    const float* d_a = (const float*)a->data;
+    float* d_out = (float*)out->data;
+
+    int threads = 256;
+
+    if (axis == 0) {
+        // sum over rows -> output length M
+        int blocks = (M + threads - 1) / threads;
+        tensor_sum_axis0_kernel<<<blocks, threads>>>(d_a, d_out, N, M);
+    }
+    else if (axis == 1) {
+        // sum over cols -> output length N
+        int blocks = (N + threads - 1) / threads;
+        tensor_sum_axis1_kernel<<<blocks, threads>>>(d_a, d_out, N, M);
+    }
+    else {
+        fprintf(stderr, "tensor_sum_axis_cuda: unsupported axis %d\n", axis);
+        exit(1);
+    }
+
+    cudaDeviceSynchronize();
+}
 
 
 #ifdef __cplusplus

@@ -32,6 +32,7 @@ void tensor_exp_cuda(const Tensor* a, Tensor* out);
 
 void tensor_add_bias_cuda(const Tensor* input, const Tensor* bias, Tensor* out);
 
+void tensor_sum_axis_cuda(const Tensor* a, int axis, Tensor* out);
 
 #ifdef __cplusplus
 }

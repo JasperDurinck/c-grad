@@ -9,7 +9,7 @@ LIB_SRC = src/tensor.c src/tensor_ops.c src/tensor_ops_cpu.c src/nn_layers.c src
 LIB_OBJ = $(LIB_SRC:%.c=build/%.o)
 
 # CUDA sources
-CUDA_SRC = cuda/tensor_ops.cu cuda/tensor.cu
+CUDA_SRC = cuda/tensor_ops.cu cuda/tensor.cu cuda/nn_layers.cu cuda/loss_fns.cu cuda/optimizers.cu
 CUDA_OBJ = $(CUDA_SRC:%.cu=build/%.o)
 
 # Examples and tests

@@ -35,6 +35,7 @@ void tensor_fill_random(Tensor* t, float min_val, float max_val);
 void tensor_free_cpu(Tensor* t);
 void tensor_free(Tensor* t);
 void tensor_print(const Tensor* t);
+void tensor_print_shape(const Tensor* t);
 Tensor* tensor_create_scalar(TensorType dtype, Device device);
 
 #endif

@@ -1,8 +1,12 @@
 #include "../include/tensor.h"
+#include "../include/loss_fns_cu.h"
 #include <math.h>
 #include <float.h>
+#include <stdio.h>
+#include <stdlib.h>
 
-float mse_loss(Tensor* y_pred, Tensor* y_true, Tensor* grad_out) {
+
+float mse_loss_cpu(Tensor* y_pred, Tensor* y_true, Tensor* grad_out) {
     float* yp = (float*)y_pred->data;
     float* yt = (float*)y_true->data;
     float* go = (float*)grad_out->data;
@@ -20,8 +24,21 @@ float mse_loss(Tensor* y_pred, Tensor* y_true, Tensor* grad_out) {
     return loss / y_pred->shape[0];
 }
 
+float mse_loss(Tensor* y_pred, Tensor* y_true, Tensor* grad_out) {
+    switch (y_pred->device) {
+        case CPU:
+            return mse_loss_cpu(y_pred, y_true, grad_out);
+            break;
+        case CUDA:
+            return mse_loss_cuda(y_pred, y_true, grad_out);
+            break;
+        default:
+            fprintf(stderr, "mse_loss: unknown device!\n");
+            exit(1);
+    }
+}
 
-float binary_cross_entropy_loss(Tensor* y_pred, Tensor* y_true, Tensor* grad_out) {
+float binary_cross_entropy_loss_cpu(Tensor* y_pred, Tensor* y_true, Tensor* grad_out) {
     float* yp = (float*)y_pred->data;
     float* yt = (float*)y_true->data;
     float* go = (float*)grad_out->data;
@@ -43,4 +60,18 @@ float binary_cross_entropy_loss(Tensor* y_pred, Tensor* y_true, Tensor* grad_out
     }
 
     return loss / y_pred->shape[0];
+}
+
+float binary_cross_entropy_loss(Tensor* y_pred, Tensor* y_true, Tensor* grad_out) {
+    switch (y_pred->device) {
+        case CPU:
+            return binary_cross_entropy_loss_cpu(y_pred, y_true, grad_out);
+            break;
+        case CUDA:
+            return binary_cross_entropy_loss_cuda(y_pred, y_true, grad_out);
+            break;
+        default:
+            fprintf(stderr, "binary_cross_entropy_loss: unknown device!\n");
+            exit(1);
+    }
 }
