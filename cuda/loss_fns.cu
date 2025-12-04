@@ -86,6 +86,69 @@ float binary_cross_entropy_loss_cuda(Tensor* y_pred, Tensor* y_true, Tensor* gra
     return h_loss;
 }
 
+// CE
+
+
+__global__ void cross_entropy_kernel(
+    const float* y_pred,
+    const int64_t* y_true,
+    float* grad_out,
+    float* loss_accum,
+    int batch,
+    int num_classes
+) {
+    int sample = blockIdx.x;
+    int c = threadIdx.x;
+
+    if (sample >= batch || c >= num_classes) return;
+
+    int idx = sample * num_classes + c;
+    int label = y_true[sample];
+
+    float p = y_pred[idx];
+
+    // clamp for stability
+    if (p < FLT_EPSILON) p = FLT_EPSILON;
+
+    // only thread c == label contributes to loss
+    if (c == label) {
+        atomicAdd(loss_accum, -logf(p) / batch);
+    }
+
+    // gradient: (p - y) / batch
+    float y = (c == label) ? 1.0f : 0.0f;
+    grad_out[idx] = (p - y) / batch;
+}
+
+
+float cross_entropy_loss_cuda(Tensor* y_pred, Tensor* y_true, Tensor* grad_out) {
+    int batch = y_pred->shape[0];
+    int num_classes = y_pred->shape[1];
+
+    const float* d_yp = (float*)y_pred->data;
+    const int64_t* d_yt = (int64_t*)y_true->data;
+    float* d_go = (float*)grad_out->data;
+
+    float h_loss = 0.0f;
+    float* d_loss;
+    cudaMalloc(&d_loss, sizeof(float));
+    cudaMemcpy(d_loss, &h_loss, sizeof(float), cudaMemcpyHostToDevice);
+
+    dim3 blocks(batch);
+    dim3 threads(num_classes);
+
+    cross_entropy_kernel<<<blocks, threads>>>(
+        d_yp, d_yt, d_go, d_loss, batch, num_classes
+    );
+    cudaDeviceSynchronize();
+
+    cudaMemcpy(&h_loss, d_loss, sizeof(float), cudaMemcpyDeviceToHost);
+    cudaFree(d_loss);
+
+    return h_loss;
+}
+
+
 
 #ifdef __cplusplus
 }

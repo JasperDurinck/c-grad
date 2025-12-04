@@ -5,3 +5,5 @@
 
 *.swp
 *.vscode/
+
+/examples/mnist/data

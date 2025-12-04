@@ -57,6 +57,12 @@ Tensor* tensor_create(int ndim, const int64_t* shape, TensorType dtype, Device d
     }
 }
 
+Tensor* tensor_create_as(const Tensor* src) {
+    Tensor* t = tensor_create(src->ndim, src->shape, src->dtype, src->device);
+    t->requires_grad = src->requires_grad;
+    return t;
+}
+
 Tensor* tensor_create_scalar_cpu(TensorType dtype, Device device) {
     Tensor* t = calloc(1, sizeof(Tensor));
     t->ndim = 0;              
@@ -81,6 +87,87 @@ Tensor* tensor_create_scalar(TensorType dtype, Device device) {
         default:
             fprintf(stderr, "tensor_create_scalar_opt: unknown device\n");
             return NULL;
+    }
+}
+
+// Returns a new tensor containing only the index-th element along dim 0
+Tensor* tensor_slice_cpu(const Tensor* src, int index) {
+    if (!src || index < 0 || index >= src->shape[0]) {
+        fprintf(stderr, "tensor_slice: index %d out of bounds (0-%" PRId64 ")\n", index, src->shape[0]-1);
+        exit(1);
+    }
+
+    // Create a new tensor like the src
+    Tensor* slice = tensor_create_as(src);
+
+    // first dimension = 1 (single slice)
+    slice->shape[0] = 1;
+
+    // Number of elements in one slice (excluding first dimension)
+    int64_t slice_size = 1;
+    for (int i = 1; i < src->ndim; i++) slice_size *= src->shape[i];
+
+    // copy the slice data
+    memcpy(slice->data,
+           (char*)src->data + index * slice_size * dtype_size(src->dtype),
+           slice_size * dtype_size(src->dtype));
+
+    return slice;
+}
+
+Tensor* tensor_slice(const Tensor* src, int index) {
+
+    switch (src->device) {
+        case CPU:
+            return tensor_slice_cpu(src, index);
+        case CUDA:
+            return tensor_slice_cuda(src, index);
+        default:
+            fprintf(stderr, "tensor_slice: unknown device\n");
+            return 0;
+    }
+}
+
+// Copy a single slice into a batch tensor at position dest_index (CPU)
+void tensor_copy_slice_cpu(Tensor* dest, const Tensor* src, int dest_index) {
+    if (!dest || !src || dest->ndim != src->ndim) {
+        fprintf(stderr, "tensor_copy_slice: invalid tensor(s)\n");
+        exit(1);
+    }
+    if (dest_index < 0 || dest_index >= dest->shape[0]) {
+        fprintf(stderr, "tensor_copy_slice: index %d out of bounds (0-%" PRId64 ")\n", dest_index, dest->shape[0]-1);
+        exit(1);
+    }
+
+    // Check inner dimensions match
+    for (int i = 1; i < dest->ndim; i++) {
+        if (dest->shape[i] != src->shape[i]) {
+            fprintf(stderr, "tensor_copy_slice: shape mismatch at dim %d\n", i);
+            exit(1);
+        }
+    }
+
+    // Number of elements in one slice
+    int64_t slice_size = 1;
+    for (int i = 1; i < src->ndim; i++) slice_size *= src->shape[i];
+
+    memcpy((char*)dest->data + dest_index * slice_size * dtype_size(dest->dtype),
+           src->data,
+           slice_size * dtype_size(dest->dtype));
+}
+
+void tensor_copy_slice(Tensor* dest, const Tensor* src, int dest_index) {
+
+    switch (src->device) {
+        case CPU:
+            tensor_copy_slice_cpu(dest, src, dest_index);
+            break;
+        case CUDA:
+            tensor_copy_slice_cuda(dest, src, dest_index);
+            break;
+        default:
+            fprintf(stderr, "tensor_copy_slice: unknown device\n");
+            break;
     }
 }
 
@@ -142,8 +229,19 @@ void tensor_fill_random(Tensor* t,  float min_val, float max_val) {
 }
 
 void tensor_free_cpu(Tensor* t) {
-    if (t->data) free(t->data);
-    if (t->grad) free(t->grad);
+    if (!t) return;
+
+    // only free data if not a view
+    if (!t->is_view && t->data) {
+        free(t->data);
+        t->data = NULL;
+    }
+
+    if (t->grad) {
+        free(t->grad);
+        t->grad = NULL;
+    }
+
     free(t);
 }
 
@@ -221,11 +319,68 @@ void tensor_print(const Tensor* t) {
     }
 }
 
-void tensor_print_shape(const Tensor* t) { // make copy to cpu if on gpu
+void tensor_print_shape(const Tensor* t) { 
     printf("Tensor(");
     for (int i = 0; i < t->ndim; i++) {
         printf("%" PRId64, t->shape[i]);
         if (i < t->ndim - 1) printf(", ");
     }
     printf(")\n");
+}
+
+Tensor* tensor_reshape(Tensor* src, int new_ndim, const int64_t* new_shape) {
+    int64_t old_numel = tensor_numel(src);
+
+    int64_t known = 1;
+    int neg1_index = -1;
+    for (int i = 0; i < new_ndim; i++) {
+        if (new_shape[i] == -1) {
+            if (neg1_index != -1) {
+                fprintf(stderr, "tensor_reshape: only one -1 dimension allowed\n");
+                exit(1);
+            }
+            neg1_index = i;
+        } else {
+            known *= new_shape[i];
+        }
+    }
+
+    int64_t inferred_shape[16];  // max dims < 16
+    for (int i = 0; i < new_ndim; i++) inferred_shape[i] = new_shape[i];
+
+    if (neg1_index != -1) {
+        if (old_numel % known != 0) {
+            fprintf(stderr, "tensor_reshape: cannot infer -1 dimension (not divisible)\n");
+            exit(1);
+        }
+        inferred_shape[neg1_index] = old_numel / known;
+    }
+
+    int64_t new_numel = 1;
+    for (int i = 0; i < new_ndim; i++) new_numel *= inferred_shape[i];
+    if (new_numel != old_numel) {
+        fprintf(stderr, "tensor_reshape: mismatch numel (%ld vs %ld)\n", old_numel, new_numel);
+        exit(1);
+    }
+
+    Tensor* t = malloc(sizeof(Tensor));
+    t->ndim = new_ndim;
+    t->dtype = src->dtype;
+    t->device = src->device;     
+    t->requires_grad = src->requires_grad;
+    t->is_view = 1;             
+
+    for (int i = 0; i < new_ndim; i++) t->shape[i] = inferred_shape[i];
+
+    // compute row major strides
+    int64_t stride = 1;
+    for (int i = new_ndim - 1; i >= 0; i--) {
+        t->stride[i] = stride;
+        stride *= t->shape[i];
+    }
+
+    t->data = src->data;
+    t->grad = NULL;  
+
+    return t;
 }

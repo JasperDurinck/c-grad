@@ -22,6 +22,7 @@ typedef struct Tensor {
     TensorType  dtype;
     Device      device;
     int         requires_grad;
+    int is_view;  // (1 == does NOT own data)
 } Tensor;
 
 
@@ -29,7 +30,11 @@ size_t dtype_size(TensorType dtype);
 int64_t tensor_numel(const Tensor* t);
 Tensor* tensor_create_cpu(int ndim, const int64_t* shape, TensorType dtype);
 Tensor* tensor_create(int ndim, const int64_t* shape, TensorType dtype, Device dev);
+Tensor* tensor_create_as(const Tensor* src);
 Tensor* tensor_create_scalar(TensorType dtype, Device device);
+Tensor* tensor_slice(const Tensor* src, int index);
+void tensor_copy_slice_cpu(Tensor* dest, const Tensor* src, int dest_index);
+void tensor_copy_slice(Tensor* dest, const Tensor* src, int dest_index);
 void tensor_fill(Tensor* t, double value);
 void tensor_fill_random(Tensor* t, float min_val, float max_val);
 void tensor_free_cpu(Tensor* t);
@@ -37,6 +42,10 @@ void tensor_free(Tensor* t);
 void tensor_print(const Tensor* t);
 void tensor_print_shape(const Tensor* t);
 Tensor* tensor_create_scalar(TensorType dtype, Device device);
+Tensor* tensor_slice_cuda(const Tensor* src, int index);
+Tensor* tensor_slice_cpu(const Tensor* src, int index);
+Tensor* tensor_slice(const Tensor* src, int index);
+Tensor* tensor_reshape(Tensor* src, int new_ndim, const int64_t* new_shape);
 
 #endif
 

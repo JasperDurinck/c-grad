@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <inttypes.h>
 #include "../include/tensor.h"
 
 #ifdef __cplusplus
@@ -158,6 +159,59 @@ void tensor_fill_random_cuda(Tensor* t, float min_val, float max_val) {
     // 6) Free temporary buffers
     cudaFree(d_tmp);
     free(h_tmp);
+}
+
+
+// Slice along first dimension
+Tensor* tensor_slice_cuda(const Tensor* src, int index) {
+    if (!src || index < 0 || index >= src->shape[0]) {
+        fprintf(stderr, "tensor_slice_cuda: index %d out of bounds (0-%" PRId64 ")\n",
+                index, src->shape[0]-1);
+        exit(1);
+    }
+
+    Tensor* slice = tensor_create_as(src);
+    slice->shape[0] = 1; // single sample
+
+    int64_t slice_size = 1;
+    for (int i = 1; i < src->ndim; i++) slice_size *= src->shape[i];
+    size_t bytes = slice_size * dtype_size(src->dtype);
+
+    cudaMemcpy(slice->data,
+               (char*)src->data + index * bytes,
+               bytes,
+               cudaMemcpyDeviceToDevice);
+
+    return slice;
+}
+
+void tensor_copy_slice_cuda(Tensor* dest, const Tensor* src, int dest_index) {
+    if (!dest || !src || dest->ndim != src->ndim) {
+        fprintf(stderr, "tensor_copy_slice_cuda: invalid tensor(s)\n");
+        exit(1);
+    }
+
+    if (dest_index < 0 || dest_index >= dest->shape[0]) {
+        fprintf(stderr, "tensor_copy_slice_cuda: index %d out of bounds (0-%" PRId64 ")\n",
+                dest_index, dest->shape[0]-1);
+        exit(1);
+    }
+
+    for (int i = 1; i < dest->ndim; i++) {
+        if (dest->shape[i] != src->shape[i]) {
+            fprintf(stderr, "tensor_copy_slice_cuda: shape mismatch at dim %d\n", i);
+            exit(1);
+        }
+    }
+
+    int64_t slice_size = 1;
+    for (int i = 1; i < src->ndim; i++) slice_size *= src->shape[i];
+    size_t bytes = slice_size * dtype_size(src->dtype);
+
+    cudaMemcpy((char*)dest->data + dest_index * bytes,
+               src->data,
+               bytes,
+               cudaMemcpyDeviceToDevice);
 }
 
 #ifdef __cplusplus

@@ -10,6 +10,8 @@
 #include <stdio.h>
 #include <inttypes.h>
 #include <stdbool.h>
+#include <assert.h>
+#include <string.h>
 
 // CPU Demo
 void demo_cpu() {
@@ -683,6 +685,207 @@ void demo_mlp_and_train_gpu() {
     printf("Forward output of last pass is stored in y_pred->data \n");
 }
 
+void demo_tensor_slice() {
+    int input_dim = 128;
+    int64_t X_shape[2] = {3, input_dim};
+
+    // CPU tensor
+    Tensor* X_cpu = tensor_create(2, X_shape, FLOAT32, CPU);
+    tensor_print_shape(X_cpu);
+
+    Tensor* X_slice_cpu = tensor_slice(X_cpu, 0);
+    tensor_print_shape(X_slice_cpu);
+
+    // Assertions CPU
+    assert(X_cpu->ndim == 2);
+    assert(X_cpu->shape[0] == 3 && X_cpu->shape[1] == 128);
+    assert(X_cpu->device == CPU);
+
+    assert(X_slice_cpu->ndim == 2);
+    assert(X_slice_cpu->shape[0] == 1 && X_slice_cpu->shape[1] == 128);
+    assert(X_slice_cpu->device == CPU);
+
+    // GPU tensor
+    Tensor* X_gpu = tensor_create(2, X_shape, FLOAT32, CUDA);
+    tensor_print_shape(X_gpu);
+
+    Tensor* X_slice_gpu = tensor_slice(X_gpu, 0);
+    tensor_print_shape(X_slice_gpu);
+
+    // Assertions GPU
+    assert(X_gpu->ndim == 2);
+    assert(X_gpu->shape[0] == 3 && X_gpu->shape[1] == 128);
+    assert(X_gpu->device == CUDA);
+
+    assert(X_slice_gpu->ndim == 2);
+    assert(X_slice_gpu->shape[0] == 1 && X_slice_gpu->shape[1] == 128);
+    assert(X_slice_gpu->device == CUDA);
+
+    printf("All tensor_slice asserts passed!\n");
+
+    // Free tensors
+    tensor_free(X_cpu);
+    tensor_free(X_slice_cpu);
+    tensor_free(X_gpu);
+    tensor_free(X_slice_gpu);
+}
+
+void demo_tensor_create_as() {
+    int input_dim = 128;
+    int64_t X_shape[2] = {3, input_dim};
+
+    Tensor* X = tensor_create(2, X_shape, FLOAT32, CUDA);
+    tensor_print_shape(X);
+
+    Tensor* X_copy = tensor_create_as(X);
+    tensor_print_shape(X_copy);
+
+    // Assert metadata matches
+    assert(X_copy->ndim == X->ndim);
+    assert(X_copy->dtype == X->dtype);
+    assert(X_copy->device == X->device);
+    for (int i = 0; i < X->ndim; i++) {
+        assert(X_copy->shape[i] == X->shape[i]);
+        assert(X_copy->stride[i] == X->stride[i]);
+    }
+
+    Tensor* X_cpu = tensor_create(2, X_shape, FLOAT32, CPU);
+    tensor_print_shape(X_cpu);
+
+    Tensor* X_cpu_copy = tensor_create_as(X_cpu);
+    tensor_print_shape(X_cpu_copy);
+
+    // Assert metadata matches for CPU copy
+    assert(X_cpu_copy->ndim == X_cpu->ndim);
+    assert(X_cpu_copy->dtype == X_cpu->dtype);
+    assert(X_cpu_copy->device == X_cpu->device);
+    for (int i = 0; i < X_cpu->ndim; i++) {
+        assert(X_cpu_copy->shape[i] == X_cpu->shape[i]);
+        assert(X_cpu_copy->stride[i] == X_cpu->stride[i]);
+    }
+
+    printf("All asserts passed!\n");
+}
+
+void demo_tensor_copy_slice() {
+    int input_dim = 4; // smaller for easy verification
+    int64_t X_shape[2] = {3, input_dim};
+
+    // CPU tensor
+    Tensor* X_cpu = tensor_create(2, X_shape, FLOAT32, CPU);
+    tensor_fill_random(X_cpu, 0.0f, 10.0f);
+
+    // Destination batch tensor (3 samples)
+    Tensor* batch_cpu = tensor_create(2, X_shape, FLOAT32, CPU);
+    tensor_fill(batch_cpu, 0.0); // zero initialize
+
+    // Copy first slice into batch
+    Tensor* slice_cpu = tensor_slice(X_cpu, 0);
+    tensor_copy_slice(batch_cpu, slice_cpu, 0);
+
+    // Assertions CPU
+    assert(batch_cpu->ndim == 2);
+    assert(batch_cpu->shape[0] == 3 && batch_cpu->shape[1] == input_dim);
+    assert(batch_cpu->device == CPU);
+
+    // Compare first row with slice data
+    int64_t slice_size = input_dim;
+    float* batch_data = (float*)batch_cpu->data;
+    float* slice_data = (float*)slice_cpu->data;
+    assert(memcmp(batch_data, slice_data, slice_size * sizeof(float)) == 0);
+
+    printf("CPU tensor_copy_slice passed!\n");
+
+    // Free CPU tensors
+    tensor_free(X_cpu);
+    tensor_free(slice_cpu);
+    tensor_free(batch_cpu);
+
+    // --- GPU version ---
+    Tensor* X_gpu = tensor_create(2, X_shape, FLOAT32, CUDA);
+    tensor_fill_random(X_gpu, 0.0f, 10.0f);
+
+    Tensor* batch_gpu = tensor_create(2, X_shape, FLOAT32, CUDA);
+    tensor_fill(batch_gpu, 0.0);
+
+    Tensor* slice_gpu = tensor_slice(X_gpu, 0);
+    tensor_copy_slice(batch_gpu, slice_gpu, 0);
+
+    // Assertions GPU
+    assert(batch_gpu->ndim == 2);
+    assert(batch_gpu->shape[0] == 3 && batch_gpu->shape[1] == input_dim);
+    assert(batch_gpu->device == CUDA);
+
+    // Copy back to CPU to verify contents
+    Tensor* batch_gpu_cpu = tensor_to_cpu(batch_gpu);
+    Tensor* slice_gpu_cpu = tensor_to_cpu(slice_gpu);
+    float* batch_cpu_data = (float*)batch_gpu_cpu->data;
+    float* slice_cpu_data = (float*)slice_gpu_cpu->data;
+
+    assert(memcmp(batch_cpu_data, slice_cpu_data, slice_size * sizeof(float)) == 0);
+
+    printf("GPU tensor_copy_slice passed!\n");
+
+    // Free GPU tensors
+    tensor_free(X_gpu);
+    tensor_free(slice_gpu);
+    tensor_free(batch_gpu);
+    tensor_free(batch_gpu_cpu);
+    tensor_free(slice_gpu_cpu);
+}
+
+
+void demo_reshape() {
+    int input_dim = 4; // smaller for easy verification
+    int64_t X_shape[2] = {3, input_dim}; // original 2D shape
+
+    // ---------------- CPU ----------------
+    Tensor* X_cpu = tensor_create(2, X_shape, FLOAT32, CPU);
+    tensor_fill_random(X_cpu, 0.0f, 10.0f);
+
+    printf("Original CPU 2D tensor:\n");
+    tensor_print_shape(X_cpu);
+
+    int64_t new_shape[3] = {3, 2, 2};
+    Tensor* X_cpu_3d = tensor_reshape(X_cpu, 3, new_shape);
+
+    printf("Reshaped CPU 3D tensor:\n");
+    tensor_print_shape(X_cpu_3d);
+
+    // Assertions
+    int64_t expected_numel = 1;
+    for (int i = 0; i < 3; i++) expected_numel *= new_shape[i];
+    assert(tensor_numel(X_cpu) == expected_numel && "CPU: Number of elements must match after reshape");
+    for (int i = 0; i < 3; i++) assert(X_cpu_3d->shape[i] == new_shape[i] && "CPU: Shape mismatch after reshape");
+
+    printf("CPU reshape assertions passed!\n");
+
+    // Cleanup CPU
+    tensor_free(X_cpu_3d); // only free view pointer
+    tensor_free(X_cpu);    // free original data
+
+    // ---------------- CUDA ----------------
+    Tensor* X_gpu = tensor_create(2, X_shape, FLOAT32, CUDA);
+    tensor_fill_random(X_gpu, 0.0f, 10.0f); // fill on GPU (implement device-specific fill)
+
+    printf("Original CUDA 2D tensor:\n");
+    tensor_print_shape(X_gpu);
+
+    Tensor* X_gpu_3d = tensor_reshape(X_gpu, 3, new_shape);
+    printf("Reshaped CUDA 3D tensor:\n");
+    tensor_print_shape(X_gpu_3d);
+
+    // Assertions
+    assert(tensor_numel(X_gpu) == expected_numel && "CUDA: Number of elements must match after reshape");
+    for (int i = 0; i < 3; i++) assert(X_gpu_3d->shape[i] == new_shape[i] && "CUDA: Shape mismatch after reshape");
+
+    printf("CUDA reshape assertions passed!\n");
+
+    // Cleanup CUDA
+    tensor_free(X_gpu_3d); // only free view pointer
+    tensor_free(X_gpu);    // free original data on GPU
+}
+
 int main() {
     demo_cpu();
     demo_gpu();
@@ -697,5 +900,10 @@ int main() {
     demo_mlp_and_train_cpu();
     demo_mlp_gpu();
     demo_mlp_and_train_gpu();
+    demo_tensor_create_as();
+    demo_tensor_slice();
+    demo_tensor_copy_slice();
+    demo_reshape();
+
     return 0;
 }
