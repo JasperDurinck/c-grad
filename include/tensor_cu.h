@@ -16,7 +16,7 @@ Tensor* tensor_create_scalar_cuda(TensorType dtype);
 void tensor_fill_random_cuda(Tensor* t, float min_val, float max_val);
 Tensor* tensor_slice_cuda(const Tensor* src, int index);
 void tensor_copy_slice_cuda(Tensor* dest, const Tensor* src, int dest_index);
-
+Tensor* tensor_concat_cuda(const Tensor* a, const Tensor* b);
 
 #ifdef __cplusplus
 }

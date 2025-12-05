@@ -46,6 +46,8 @@ Tensor* tensor_slice_cuda(const Tensor* src, int index);
 Tensor* tensor_slice_cpu(const Tensor* src, int index);
 Tensor* tensor_slice(const Tensor* src, int index);
 Tensor* tensor_reshape(Tensor* src, int new_ndim, const int64_t* new_shape);
+Tensor* tensor_concat_cpu(const Tensor* a, const Tensor* b, int dim);
+Tensor* tensor_concat(const Tensor* a, const Tensor* b, int dim); 
 
 #endif
 

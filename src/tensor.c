@@ -124,7 +124,7 @@ Tensor* tensor_slice(const Tensor* src, int index) {
             return tensor_slice_cuda(src, index);
         default:
             fprintf(stderr, "tensor_slice: unknown device\n");
-            return 0;
+            exit(1);
     }
 }
 
@@ -263,6 +263,37 @@ void tensor_free(Tensor* t) {
 
 #define MAX_PRINT 5  // maximum elements per dimension to print
 
+// void tensor_print_recursive(const Tensor* t, int dim, int64_t offset) {
+//     if (dim == t->ndim) {
+//         // Base case: print a single element
+//         if (t->dtype == FLOAT32)
+//             printf("%6.2f", ((float*)t->data)[offset]);
+//         else if (t->dtype == INT32)
+//             printf("%6d", ((int*)t->data)[offset]);
+//         return;
+//     }
+
+//     printf("[");
+//     int64_t limit = t->shape[dim];
+
+//     for (int64_t i = 0; i < limit; i++) {
+//         // for large dimensions, skip middle elements
+//         if (limit > MAX_PRINT * 2 && i == MAX_PRINT) {
+//             printf(" ... ");
+//             i = limit - MAX_PRINT;
+//         }
+
+//         // new line for higher dims
+//         if (dim < t->ndim - 1 && i > 0)
+//             printf("\n ");
+
+//         tensor_print_recursive(t, dim + 1, offset + i * t->stride[dim]);
+
+//         if (i < limit - 1) printf(", ");
+//     }
+//     printf("]");
+// }
+
 void tensor_print_recursive(const Tensor* t, int dim, int64_t offset) {
     if (dim == t->ndim) {
         // Base case: print a single element
@@ -270,6 +301,8 @@ void tensor_print_recursive(const Tensor* t, int dim, int64_t offset) {
             printf("%6.2f", ((float*)t->data)[offset]);
         else if (t->dtype == INT32)
             printf("%6d", ((int*)t->data)[offset]);
+        else if (t->dtype == INT64)           // <--- added
+            printf("%6" PRId64, ((int64_t*)t->data)[offset]);
         return;
     }
 
@@ -293,6 +326,7 @@ void tensor_print_recursive(const Tensor* t, int dim, int64_t offset) {
     }
     printf("]");
 }
+
 
 void tensor_print(const Tensor* t) {
     const Tensor* to_print = t;
@@ -383,4 +417,52 @@ Tensor* tensor_reshape(Tensor* src, int new_ndim, const int64_t* new_shape) {
     t->grad = NULL;  
 
     return t;
+}
+
+Tensor* tensor_concat_cpu(const Tensor* a, const Tensor* b, int dim) {
+    if (dim != 0) {
+        fprintf(stderr, "tensor_concat: only dim=0 supported\n");
+        exit(1);
+    }
+
+    if (a->ndim != b->ndim) {
+        fprintf(stderr, "tensor_concat: tensors must have same ndim\n");
+        exit(1);
+    }
+
+    for (int i = 1; i < a->ndim; i++) {
+        if (a->shape[i] != b->shape[i]) {
+            fprintf(stderr, "tensor_concat: shapes must match except dim 0\n");
+            exit(1);
+        }
+    }
+
+    // new shape
+    int64_t new_shape[MAX_DIMS];
+    new_shape[0] = a->shape[0] + b->shape[0];
+    for (int i = 1; i < a->ndim; i++) new_shape[i] = a->shape[i];
+
+    Tensor* out = tensor_create_cpu(a->ndim, new_shape, a->dtype);
+
+    size_t elem_size = dtype_size(a->dtype);
+    int64_t numel_a = tensor_numel(a);
+    int64_t numel_b = tensor_numel(b);
+
+    memcpy(out->data, a->data, numel_a * elem_size);
+    memcpy((char*)out->data + numel_a * elem_size, b->data, numel_b * elem_size);
+
+    return out;
+}
+
+
+Tensor* tensor_concat(const Tensor* a, const Tensor* b, int dim) {
+    switch (a->device) {
+        case CPU:
+            return tensor_concat_cpu(a, b, dim);
+        case CUDA:
+            return tensor_concat_cuda(a, b); //TODO add more dims, only 0 now
+        default:
+            fprintf(stderr, "tensor_concat: unknown device\n");
+            exit(1);
+    }
 }

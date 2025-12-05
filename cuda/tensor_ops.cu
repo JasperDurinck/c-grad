@@ -484,6 +484,54 @@ void tensor_sum_axis_cuda(const Tensor* a, int axis, Tensor* out)
 }
 
 
+// CUDA kernel for argmax along dim=1
+__global__ void tensor_argmax_dim1_kernel(const float* src, int64_t* out, int64_t rows, int64_t cols) {
+    int64_t row = blockIdx.x * blockDim.x + threadIdx.x;
+    if (row >= rows) return;
+
+    const float* row_ptr = src + row * cols;
+    int64_t max_idx = 0;
+    float max_val = row_ptr[0];
+
+    for (int64_t j = 1; j < cols; j++) {
+        if (row_ptr[j] > max_val) {
+            max_val = row_ptr[j];
+            max_idx = j;
+        }
+    }
+
+    out[row] = max_idx;
+}
+
+// Wrapper function
+Tensor* tensor_argmax_dim1_cuda(const Tensor* src) {
+    if (src->ndim != 2) {
+        fprintf(stderr, "tensor_argmax_dim1_cuda: only 2D tensors supported\n");
+        exit(1);
+    }
+
+    int64_t rows = src->shape[0];
+    int64_t cols = src->shape[1];
+
+    int64_t shape[1]; 
+    shape[0] = rows;
+
+    Tensor* out = tensor_create(1, shape, INT64, CUDA);
+
+    int threads = 256;
+    int blocks = (rows + threads - 1) / threads;
+
+    tensor_argmax_dim1_kernel<<<blocks, threads>>>(
+        (const float*)src->data,
+        (int64_t*)out->data,
+        rows,
+        cols
+    );
+    cudaDeviceSynchronize();
+
+    return out;
+}
+
 #ifdef __cplusplus
 }
 #endif

@@ -214,6 +214,63 @@ void tensor_copy_slice_cuda(Tensor* dest, const Tensor* src, int dest_index) {
                cudaMemcpyDeviceToDevice);
 }
 
+
+// CUDA kernel to copy tensor data
+__global__ void tensor_concat_kernel(
+    const float* a,
+    const float* b,
+    float* out,
+    int64_t offset_a,
+    int64_t offset_b
+) {
+    int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < offset_a) {
+        out[idx] = a[idx];
+    } else if (idx < offset_a + offset_b) {
+        out[idx] = b[idx - offset_a];
+    }
+}
+
+// Concatenate two CUDA tensors along dim=0
+Tensor* tensor_concat_cuda(const Tensor* a, const Tensor* b) {
+    if (a->ndim != b->ndim) {
+        fprintf(stderr, "tensor_concat_cuda: tensors must have same ndim\n");
+        exit(1);
+    }
+    for (int i = 1; i < a->ndim; i++) {
+        if (a->shape[i] != b->shape[i]) {
+            fprintf(stderr, "tensor_concat_cuda: shapes must match except dim 0\n");
+            exit(1);
+        }
+    }
+
+    // new shape
+    int64_t new_shape[MAX_DIMS];
+    new_shape[0] = a->shape[0] + b->shape[0];
+    for (int i = 1; i < a->ndim; i++) new_shape[i] = a->shape[i];
+
+    Tensor* out = tensor_create(a->ndim, new_shape, a->dtype, CUDA);
+
+    int64_t numel_a = tensor_numel(a);
+    int64_t numel_b = tensor_numel(b);
+    int64_t total = numel_a + numel_b;
+
+    int threads = 256;
+    int blocks = (total + threads - 1) / threads;
+
+    tensor_concat_kernel<<<blocks, threads>>>(
+        (const float*)a->data,
+        (const float*)b->data,
+        (float*)out->data,
+        numel_a,
+        numel_b
+    );
+    cudaDeviceSynchronize();
+
+    return out;
+}
+
 #ifdef __cplusplus
 }
 #endif

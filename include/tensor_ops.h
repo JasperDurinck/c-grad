@@ -26,6 +26,7 @@ void tensor_transpose(const Tensor* a, Tensor* out);
 void tensor_sum(const Tensor* a, Tensor* out);
 void tensor_mean(const Tensor* a, Tensor* out);
 void tensor_argmax(const Tensor* a, Tensor* out);
+Tensor* tensor_argmax_dim1(const Tensor* src);
 void tensor_max(const Tensor* a, Tensor* out);
 
 void tensor_exp(const Tensor* a, Tensor* out);

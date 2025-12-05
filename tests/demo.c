@@ -6,6 +6,7 @@
 #include "../include/loss_fns.h"
 #include "../include/loss_fns_cu.h"
 #include "../include/optimizers.h"
+#include "../include/metrics.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <inttypes.h>
@@ -768,7 +769,7 @@ void demo_tensor_create_as() {
 }
 
 void demo_tensor_copy_slice() {
-    int input_dim = 4; // smaller for easy verification
+    int input_dim = 4; 
     int64_t X_shape[2] = {3, input_dim};
 
     // CPU tensor
@@ -777,7 +778,7 @@ void demo_tensor_copy_slice() {
 
     // Destination batch tensor (3 samples)
     Tensor* batch_cpu = tensor_create(2, X_shape, FLOAT32, CPU);
-    tensor_fill(batch_cpu, 0.0); // zero initialize
+    tensor_fill(batch_cpu, 0.0); 
 
     // Copy first slice into batch
     Tensor* slice_cpu = tensor_slice(X_cpu, 0);
@@ -826,7 +827,6 @@ void demo_tensor_copy_slice() {
 
     printf("GPU tensor_copy_slice passed!\n");
 
-    // Free GPU tensors
     tensor_free(X_gpu);
     tensor_free(slice_gpu);
     tensor_free(batch_gpu);
@@ -834,10 +834,9 @@ void demo_tensor_copy_slice() {
     tensor_free(slice_gpu_cpu);
 }
 
-
 void demo_reshape() {
-    int input_dim = 4; // smaller for easy verification
-    int64_t X_shape[2] = {3, input_dim}; // original 2D shape
+    int input_dim = 4; 
+    int64_t X_shape[2] = {3, input_dim}; 
 
     // ---------------- CPU ----------------
     Tensor* X_cpu = tensor_create(2, X_shape, FLOAT32, CPU);
@@ -861,12 +860,12 @@ void demo_reshape() {
     printf("CPU reshape assertions passed!\n");
 
     // Cleanup CPU
-    tensor_free(X_cpu_3d); // only free view pointer
-    tensor_free(X_cpu);    // free original data
+    tensor_free(X_cpu_3d); 
+    tensor_free(X_cpu);    
 
-    // ---------------- CUDA ----------------
+    // -------------- CUDA --------------
     Tensor* X_gpu = tensor_create(2, X_shape, FLOAT32, CUDA);
-    tensor_fill_random(X_gpu, 0.0f, 10.0f); // fill on GPU (implement device-specific fill)
+    tensor_fill_random(X_gpu, 0.0f, 10.0f);
 
     printf("Original CUDA 2D tensor:\n");
     tensor_print_shape(X_gpu);
@@ -882,9 +881,246 @@ void demo_reshape() {
     printf("CUDA reshape assertions passed!\n");
 
     // Cleanup CUDA
-    tensor_free(X_gpu_3d); // only free view pointer
-    tensor_free(X_gpu);    // free original data on GPU
+    tensor_free(X_gpu_3d); 
+    tensor_free(X_gpu);   
 }
+
+int demo_concat() {
+    // --- CPU Demo ---
+    printf("=== CPU tensor concat demo ===\n");
+    int64_t shape[2] = {2, 3}; 
+
+    Tensor* a_cpu = tensor_create_cpu(2, shape, FLOAT32);
+    Tensor* b_cpu = tensor_create_cpu(2, shape, FLOAT32);
+
+    tensor_fill(a_cpu, 1.0);
+    tensor_fill(b_cpu, 2.0); 
+
+    printf("Tensor A (CPU):\n"); tensor_print(a_cpu);
+    printf("Tensor B (CPU):\n"); tensor_print(b_cpu);
+
+    Tensor* c_cpu = tensor_concat(a_cpu, b_cpu, 0);
+
+    printf("Concatenated Tensor (CPU):\n"); tensor_print(c_cpu);
+
+    tensor_free(a_cpu);
+    tensor_free(b_cpu);
+    tensor_free(c_cpu);
+
+    // --- GPU Demo ---
+    printf("\n=== GPU tensor concat demo ===\n");
+
+    Tensor* a_gpu = tensor_create(2, shape, FLOAT32, CUDA);
+    Tensor* b_gpu = tensor_create(2, shape, FLOAT32, CUDA);
+
+    tensor_fill(a_gpu, 3.0); 
+    tensor_fill(b_gpu, 4.0); 
+
+    printf("Tensor A (GPU):\n"); tensor_print(a_gpu);
+    printf("Tensor B (GPU):\n"); tensor_print(b_gpu);
+
+    Tensor* c_gpu = tensor_concat_cuda(a_gpu, b_gpu);
+
+    printf("Concatenated Tensor (GPU):\n"); tensor_print(c_gpu);
+
+    tensor_free(a_gpu);
+    tensor_free(b_gpu);
+    tensor_free(c_gpu);
+
+    return 0;
+}
+
+int demo_metrics()
+{
+    srand(0);
+
+    int64_t shape[2] = {4, 6};
+    int batch = shape[0];
+    int labels = shape[1];
+
+    // Create CPU tensors (your API)
+    Tensor* y_pred = tensor_create(2, shape, FLOAT32, CPU);
+    Tensor* y_true = tensor_create(2, shape, FLOAT32, CPU);
+
+    printf("=== TEST 1: All correct ===\n");
+    tensor_fill(y_pred, 1.0);
+    tensor_fill(y_true, 1.0);
+    printf("Pred:\n"); tensor_print(y_pred);
+    printf("True:\n"); tensor_print(y_true);
+    printf("Accuracy = %f\n", accuracy(y_pred, y_true));
+    printf("MCC = %f\n\n", mcc_score(y_pred, y_true));
+
+    printf("=== TEST 2: All wrong ===\n");
+    tensor_fill(y_pred, 1.0);
+    tensor_fill(y_true, 0.0);
+    printf("Pred:\n"); tensor_print(y_pred);
+    printf("True:\n"); tensor_print(y_true);
+    printf("Accuracy = %f\n", accuracy(y_pred, y_true));
+    printf("MCC = %f\n\n", mcc_score(y_pred, y_true));
+
+    printf("=== TEST 3: Random values ∈ [0,1] ===\n");
+    tensor_fill_random(y_pred, 0.0f, 1.0f);
+    tensor_fill_random(y_true, 0.0f, 1.0f);
+    printf("Pred:\n"); tensor_print(y_pred);
+    printf("True:\n"); tensor_print(y_true);
+    printf("Accuracy = %f\n", accuracy(y_pred, y_true));
+    printf("MCC = %f\n\n", mcc_score(y_pred, y_true));
+
+    tensor_free(y_pred);
+    tensor_free(y_true);
+
+    return 0;
+}
+
+int demo_metrics_concat() {
+    srand(0);
+
+    int64_t shape[2] = {4, 6};
+    int batch = shape[0];
+    int labels = shape[1];
+
+    // Create two CPU tensors
+    Tensor* y_pred1 = tensor_create(2, shape, FLOAT32, CPU);
+    Tensor* y_pred2 = tensor_create(2, shape, FLOAT32, CPU);
+    Tensor* y_true1 = tensor_create(2, shape, FLOAT32, CPU);
+    Tensor* y_true2 = tensor_create(2, shape, FLOAT32, CPU);
+
+    // Fill first half with all 1s (correct)
+    tensor_fill(y_pred1, 1.0);
+    tensor_fill(y_true1, 1.0);
+
+    // Fill second half with all 0s (incorrect)
+    tensor_fill(y_pred2, 0.0);
+    tensor_fill(y_true2, 1.0);  // true labels are 1, so this half is wrong
+
+    // Concatenate along dim 0
+    Tensor* y_pred = tensor_concat(y_pred1, y_pred2, 0);
+    Tensor* y_true = tensor_concat(y_true1, y_true2, 0);
+
+    printf("Concatenated Predictions:\n"); tensor_print(y_pred);
+    printf("Concatenated True Labels:\n"); tensor_print(y_true);
+
+    // Compute metrics
+    printf("Accuracy = %f\n", accuracy(y_pred, y_true));
+    printf("MCC = %f\n", mcc_score(y_pred, y_true));
+
+    // Free tensors
+    tensor_free(y_pred1);
+    tensor_free(y_pred2);
+    tensor_free(y_true1);
+    tensor_free(y_true2);
+    tensor_free(y_pred);
+    tensor_free(y_true);
+
+    return 0;
+}
+
+int demo_argmax_dim1() {
+    srand(0);
+
+    int64_t shape[2] = {4, 6}; // 4 samples, 6 features each
+    Tensor* X = tensor_create(2, shape, FLOAT32, CPU);
+
+    // Fill with random values [0, 1]
+    tensor_fill_random(X, 0.0f, 1.0f);
+
+    printf("Input Tensor X:\n");
+    tensor_print(X);
+
+    // Argmax along dim=1 (per row)
+    Tensor* argmax_out = tensor_argmax_dim1(X);
+
+    printf("Argmax indices (per row):\n");
+    tensor_print(argmax_out);
+
+    tensor_free(X);
+    tensor_free(argmax_out);
+
+    return 0;
+}
+
+
+void demo_metrics_simple() {
+    // --- 4 samples, 3 classes ---
+    int64_t shape[2] = {4, 3};
+    Tensor* y_pred = tensor_create(2, shape, FLOAT32, CPU);
+    Tensor* y_true = tensor_create(1, (int64_t[]){4}, INT64, CPU);
+
+    // Fill predictions
+    float pred_data[12] = {0.1, 0.9, 0.0,
+                           0.8, 0.1, 0.1,
+                           0.2, 0.3, 0.5,
+                           0.0, 0.1, 0.9};
+    memcpy(y_pred->data, pred_data, sizeof(pred_data));
+
+    int64_t true_data[4] = {1, 1, 2, 2};
+    memcpy(y_true->data, true_data, sizeof(true_data));
+
+    Tensor* y_argmax = tensor_argmax_dim1(y_pred);
+
+    printf("Predictions argmax:\n");
+    tensor_print(y_argmax);
+    printf("True labels:\n");
+    tensor_print(y_true);
+
+    printf("Accuracy = %f\n", accuracy(y_argmax, y_true));
+    printf("MCC = %f\n", mcc_mc_score(y_argmax, y_true, 3));
+
+    // expected
+    // Accuracy = 0.750000
+    // MCC = 0.670820
+
+    tensor_free(y_pred);
+    tensor_free(y_true);
+    tensor_free(y_argmax);
+}
+
+void demo_metrics_gpu() {
+    // --- 4 samples, 3 classes ---
+    int64_t shape[2] = {4, 3};
+    Tensor* y_pred_cpu = tensor_create(2, shape, FLOAT32, CPU);
+    Tensor* y_true_cpu = tensor_create(1, (int64_t[]){4}, INT64, CPU);
+
+    // Fill predictions (CPU)
+    float pred_data[12] = {0.1, 0.9, 0.0,
+                           0.8, 0.1, 0.1,
+                           0.2, 0.3, 0.5,
+                           0.0, 0.1, 0.9};
+    memcpy(y_pred_cpu->data, pred_data, sizeof(pred_data));
+
+    int64_t true_data[4] = {1, 1, 2, 2};
+    memcpy(y_true_cpu->data, true_data, sizeof(true_data));
+
+    // Copy to GPU
+    Tensor* y_pred = tensor_to_cuda(y_pred_cpu);
+    Tensor* y_true = tensor_to_cuda(y_true_cpu);
+
+    // Argmax on GPU
+    Tensor* y_argmax = tensor_argmax_dim1(y_pred);  // should handle GPU internally
+
+    // Copy back to CPU for printing and metrics
+    Tensor* y_argmax_cpu = tensor_to_cpu(y_argmax);
+    Tensor* y_true_cpu2 = tensor_to_cpu(y_true);
+
+    printf("Predictions argmax:\n");
+    tensor_print(y_argmax_cpu);
+    printf("True labels:\n");
+    tensor_print(y_true_cpu2);
+
+    // Metrics
+    printf("Accuracy = %f\n", accuracy(y_argmax_cpu, y_true_cpu2));
+    printf("MCC = %f\n", mcc_mc_score(y_argmax_cpu, y_true_cpu2, 3));
+
+    // Cleanup
+    tensor_free(y_pred_cpu);
+    tensor_free(y_true_cpu);
+    tensor_free(y_pred);
+    tensor_free(y_true);
+    tensor_free(y_argmax);
+    tensor_free(y_argmax_cpu);
+    tensor_free(y_true_cpu2);
+}
+
 
 int main() {
     demo_cpu();
@@ -904,6 +1140,12 @@ int main() {
     demo_tensor_slice();
     demo_tensor_copy_slice();
     demo_reshape();
-
+    demo_metrics();
+    demo_concat();
+    demo_concat();
+    demo_metrics_concat();
+    demo_argmax_dim1();
+    demo_metrics_simple();
+    demo_metrics_gpu();
     return 0;
 }

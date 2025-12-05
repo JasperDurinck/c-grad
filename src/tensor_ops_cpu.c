@@ -135,6 +135,35 @@ void tensor_argmax_cpu(const Tensor* a, Tensor* out) {
     po[0] = max_idx;
 }
 
+Tensor* tensor_argmax_dim1_cpu(const Tensor* src) {
+    if (src->ndim != 2) {
+        fprintf(stderr, "tensor_argmax_dim1: only 2D tensors supported\n");
+        exit(1);
+    }
+
+    int64_t rows = src->shape[0];
+    int64_t cols = src->shape[1];
+
+    Tensor* out = tensor_create(1, (int64_t[]){rows}, INT64, CPU);
+
+    float* data = (float*)src->data;
+    int64_t* out_data = (int64_t*)out->data;
+
+    for (int64_t i = 0; i < rows; i++) {
+        int64_t max_idx = 0;
+        float max_val = data[i * cols];
+        for (int64_t j = 1; j < cols; j++) {
+            if (data[i * cols + j] > max_val) {
+                max_val = data[i * cols + j];
+                max_idx = j;
+            }
+        }
+        out_data[i] = max_idx;
+    }
+
+    return out;
+}
+
 void tensor_sum_cpu(const Tensor* a, Tensor* out) {
     int64_t n = tensor_numel(a);
     float s = 0.0f;

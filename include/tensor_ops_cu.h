@@ -23,6 +23,7 @@ void tensor_transpose_cuda(const Tensor* a, Tensor* out);
 // Reduce
 
 void tensor_argmax_cuda(const Tensor* a, Tensor* out);
+Tensor* tensor_argmax_dim1_cuda(const Tensor* src); //TODO
 void tensor_max_cuda(const Tensor* a, Tensor* out);
 void tensor_mean_cuda(const Tensor* a, Tensor* out);
 void tensor_sum_cuda(const Tensor* a, Tensor* out);

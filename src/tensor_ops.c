@@ -243,6 +243,20 @@ void tensor_argmax(const Tensor* a, Tensor* out) {
     }
 }
 
+Tensor* tensor_argmax_dim1(const Tensor* src) {
+    switch (src->device) {
+        case CPU:
+            tensor_argmax_dim1_cpu(src);
+            break;
+        case CUDA:
+            tensor_argmax_dim1_cuda(src);
+            break;
+        default:
+            fprintf(stderr, "tensor_argmax: unsupported device\n");
+            exit(1);
+    }
+}
+
 void tensor_max(const Tensor* a, Tensor* out) {
     switch (a->device) {
         case CPU:
