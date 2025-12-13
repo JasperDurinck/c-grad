@@ -14,6 +14,13 @@ Training a simple MLP on MNIST with C-Grad:
 
 ![Training MNIST MLP](docs/mnist_mlp.gif)
 
+
+## (new) MNIST CNN Demo
+
+Training a simple CNN on MNIST with C-Grad:
+
+![Training MNIST CNN](docs/mnist_cnn.png)
+
 ---
 
 ## Contact
@@ -25,4 +32,4 @@ For questions, collaborations, or contributions, feel free to reach out at:
 MIT © 2025 Jasper Durinck
 
 ## Version
-Version 0.2
+Version 0.3

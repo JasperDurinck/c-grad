@@ -42,7 +42,28 @@ void relu_forward(Layer* layer, Tensor* input);
 void relu_backward(Layer* layer, Tensor* grad_output);
 Layer* create_relu_layer();
 
+// CNN
 
+void conv2d_layer_forward_cpu(Layer* layer, Tensor* input);
+void conv2d_layer_backward_cpu(Layer* layer, Tensor* grad_output);
+
+void maxpool2d_layer_forward_cpu(Layer* layer, Tensor* input);
+void maxpool2d_layer_backward_cpu(Layer* layer, Tensor* grad_output);
+
+void conv2d_layer_forward(Layer* layer, Tensor* input);
+void conv2d_layer_backward(Layer* layer, Tensor* grad_output);
+
+Layer* create_maxpool2d_layer();
+Layer* create_conv2d_layer(int C_in, int C_out, int kH, int kW, Device dev);
+
+void flatten_layer_forward(Layer* layer, Tensor* input);
+void flatten_layer_backward(Layer* layer, Tensor* grad_output);
+
+Layer* create_flatten_layer();
+
+
+void maxpool2d_layer_forward(Layer* layer, Tensor* input);
+void maxpool2d_layer_backward(Layer* layer, Tensor* grad_output);
 
 #endif
 

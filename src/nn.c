@@ -57,7 +57,6 @@ Tensor* network_forward(Network* net, Tensor* x, bool verbose) {
     return current;
 }
 
-
 void network_backward(Network* net, Tensor* grad_output, bool verbose) {
     Tensor* current_grad = grad_output; // start from loss gradient w.r.t output
 
@@ -119,7 +118,6 @@ void network_backward(Network* net, Tensor* grad_output, bool verbose) {
     if (verbose) printf("\n--- Backward pass complete ---\n");
 }
 
-
 Network* create_mlp(int input_dim, int hidden_dim, int output_dim, int hidden_layers, Device dev)
 {
     Network* net = malloc(sizeof(Network));
@@ -140,6 +138,70 @@ Network* create_mlp(int input_dim, int hidden_dim, int output_dim, int hidden_la
 
     // Last layer ->output
     net->layers[idx++] = create_linear_layer(hidden_dim, output_dim, dev);
+
+    return net;
+}
+
+Network* create_cnn(Device dev, const CNNConfig* cfg) {
+    Network* net = malloc(sizeof(Network));
+    net->n_layers = 7;
+    net->layers = malloc(sizeof(Layer*) * net->n_layers);
+
+    int idx = 0;
+
+    // Track spatial size after each layer
+    int H = cfg->input_height;
+    int W = cfg->input_width;
+
+    // ---------------- Conv1 ----------------
+    net->layers[idx++] = create_conv2d_layer(
+        cfg->input_channels,
+        cfg->conv1_out_channels,
+        cfg->conv1_kernel_h,
+        cfg->conv1_kernel_w,
+        dev
+    );
+
+    // Update output spatial size after Conv1
+    H = H - cfg->conv1_kernel_h + 1;
+    W = W - cfg->conv1_kernel_w + 1;
+
+    // ---------------- ReLU ----------------
+    net->layers[idx++] = create_relu_layer();
+
+    // ---------------- MaxPool ----------------
+    net->layers[idx++] = create_maxpool2d_layer();  // assume 2x2, stride 2
+
+    // Update size after 2x2 pool
+    H = H / 2;
+    W = W / 2;
+
+    // ---------------- Conv2 ----------------
+    net->layers[idx++] = create_conv2d_layer(
+        cfg->conv1_out_channels,
+        cfg->conv2_out_channels,
+        cfg->conv2_kernel_h,
+        cfg->conv2_kernel_w,
+        dev
+    );
+
+    // Update output size
+    H = H - cfg->conv2_kernel_h + 1;
+    W = W - cfg->conv2_kernel_w + 1;
+
+    // ---------------- ReLU ----------------
+    net->layers[idx++] = create_relu_layer();
+
+    // ---------------- Flatten ----------------
+    net->layers[idx++] = create_flatten_layer();
+
+    // ---------------- Linear ----------------
+    int linear_in_features = cfg->conv2_out_channels * H * W;
+    net->layers[idx++] = create_linear_layer(
+        linear_in_features,
+        cfg->linear_out_features,
+        dev
+    );
 
     return net;
 }

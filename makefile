@@ -13,7 +13,7 @@ CUDA_SRC = cuda/tensor_ops.cu cuda/tensor.cu cuda/nn_layers.cu cuda/loss_fns.cu 
 CUDA_OBJ = $(CUDA_SRC:%.cu=build/%.o)
 
 # Examples and tests
-EXAMPLES = tests/demo.c examples/mnist/mnist_mlp.c
+EXAMPLES = tests/demo.c examples/mnist/mnist_mlp.c examples/mnist/mnist_cnn.c
 PROGRAMS = $(EXAMPLES:%.c=build/%)
 
 # Default target

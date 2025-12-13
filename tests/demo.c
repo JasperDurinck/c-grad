@@ -1039,7 +1039,6 @@ int demo_argmax_dim1() {
     return 0;
 }
 
-
 void demo_metrics_simple() {
     // --- 4 samples, 3 classes ---
     int64_t shape[2] = {4, 3};
@@ -1121,31 +1120,583 @@ void demo_metrics_gpu() {
     tensor_free(y_true_cpu2);
 }
 
+void demo_conv2d_forward_cpu() {
+    printf("\n=== CPU conv2d forward Demo ===\n");
+
+    // Input tensor: N=1, C_in=1, H=3, W=3
+    int64_t input_shape[4] = {1, 1, 3, 3};
+    Tensor* input = tensor_create(4, input_shape, FLOAT32, CPU);
+
+    // Fill input with 1..9
+    float* x_data = (float*)input->data;
+    for (int i = 0; i < 9; i++) x_data[i] = (float)(i+1);
+
+    // Weight tensor: C_out=1, C_in=1, kH=2, kW=2
+    int64_t w_shape[4] = {1, 1, 2, 2};
+    Tensor* W = tensor_create(4, w_shape, FLOAT32, CPU);
+    float* w_data = (float*)W->data;
+    for (int i = 0; i < 4; i++) w_data[i] = 1.0f;
+
+    // Bias tensor: C_out=1
+    int64_t b_shape[1] = {1};
+    Tensor* b = tensor_create(1, b_shape, FLOAT32, CPU);
+    float* b_data = (float*)b->data;
+    b_data[0] = 0.0f;
+
+    // Layer setup
+    Layer layer;
+    layer.weights = (Tensor**)malloc(2*sizeof(Tensor*));
+    layer.weights[0] = W;
+    layer.weights[1] = b;
+    layer.n_weights = 2;
+    layer.output = NULL;
+    layer.input = NULL;
+    layer.grad_input = NULL;
+    layer.forward = conv2d_layer_forward;
+    layer.backward = NULL;
+
+    // Forward pass
+    layer.forward(&layer, input);
+
+    printf("Conv2D output (CPU):\n");
+    tensor_print(layer.output);
+
+    // Expected output for this input/kernel/bias
+    float expected[4] = {12.0f, 16.0f, 24.0f, 28.0f};
+    float* out_data = (float*)layer.output->data;
+
+    // Assert each element
+    for (int i = 0; i < 4; i++) {
+        assert(out_data[i] == expected[i]);
+    }
+
+    printf("Assertion passed: Conv2D forward output is correct!\n");
+
+    // Cleanup
+    tensor_free(input);
+    tensor_free(W);
+    tensor_free(b);
+    tensor_free(layer.output);
+    free(layer.weights);
+}
+
+void demo_conv2d_backward_cpu() {
+    printf("\n=== CPU Conv2D backward Demo ===\n");
+
+    // Input: N=1, C_in=1, H=3, W=3
+    int64_t input_shape[4] = {1, 1, 3, 3};
+    Tensor* input = tensor_create(4, input_shape, FLOAT32, CPU);
+    float* x_data = (float*)input->data;
+    for (int i = 0; i < 9; i++) x_data[i] = (float)(i+1);  // 1..9
+
+    // Weight: C_out=1, C_in=1, kH=2, kW=2
+    int64_t w_shape[4] = {1, 1, 2, 2};
+    Tensor* W = tensor_create(4, w_shape, FLOAT32, CPU);
+    float* w_data = (float*)W->data;
+    for (int i = 0; i < 4; i++) w_data[i] = 1.0f;  // all ones
+
+    // Bias
+    int64_t b_shape[1] = {1};
+    Tensor* b = tensor_create(1, b_shape, FLOAT32, CPU);
+    float* b_data = (float*)b->data;
+    b_data[0] = 0.0f;
+
+    // Layer setup
+    Layer layer;
+    layer.weights = (Tensor**)malloc(2*sizeof(Tensor*));
+    layer.weights[0] = W;
+    layer.weights[1] = b;
+    layer.n_weights = 2;
+    layer.input = NULL;
+    layer.output = NULL;
+    layer.grad_input = NULL;
+    layer.forward = conv2d_layer_forward;
+    layer.backward = conv2d_layer_backward;
+
+    // Forward pass (to set layer.input)
+    layer.forward(&layer, input);
+
+    // Gradient of loss w.r.t output: just ones for simplicity
+    Tensor* grad_output = tensor_create(4, layer.output->shape, FLOAT32, CPU);
+    tensor_fill(grad_output, 1.0f);
+
+    // Backward pass
+    layer.backward(&layer, grad_output);
+
+    // Print and assert grad_input
+    printf("\ngrad_input (CPU):\n");
+    tensor_print(layer.grad_input);
+
+    // Expected grad_input manually computed:
+    // For our input/kernel, the grad_input should be:
+    // [[[[1,2,1],
+    //    [2,4,2],
+    //    [1,2,1]]]]
+    float expected_grad_input[9] = {1,2,1, 2,4,2, 1,2,1};
+    float* gx = (float*)layer.grad_input->data;
+    for (int i = 0; i < 9; i++) {
+        assert(gx[i] == expected_grad_input[i]);
+    }
+
+    // Print and assert grad_weight
+    printf("\ngrad_weight (CPU):\n");
+    tensor_print(W->grad);
+
+    // Expected grad_weight for this simple case:
+    // sum of all 2x2 sliding windows of input:
+    // [[[[12,16],
+    //    [24,28]]]]  (matches forward output)
+    float expected_grad_weight[4] = {12,16,24,28};
+    float* gw = (float*)W->grad->data;
+    for (int i = 0; i < 4; i++) {
+        assert(gw[i] == expected_grad_weight[i]);
+    }
+
+    // Print and assert grad_bias
+    if (b && b->grad) {
+        printf("\ngrad_bias (CPU):\n");
+        tensor_print(b->grad);
+
+        // Only one output channel, sum of grad_output = 1+1+1+1=4
+        assert(((float*)b->grad->data)[0] == 4.0f);
+    }
+
+    printf("\nAssertions passed: Conv2D backward gradients are correct!\n");
+
+    // Cleanup
+    tensor_free(input);
+    tensor_free(W);
+    tensor_free(b);
+    tensor_free(layer.output);
+    tensor_free(layer.grad_input);
+    tensor_free(grad_output);
+    free(layer.weights);
+}
+
+void demo_conv2d_backward_gpu() {
+    printf("\n=== GPU Conv2D backward Demo (CPU style) ===\n");
+
+    // --- CPU input/weights/bias setup ---
+    int64_t input_shape[4] = {1, 1, 3, 3};
+    Tensor* input = tensor_create(4, input_shape, FLOAT32, CPU);
+    float* x_data = (float*)input->data;
+    for (int i = 0; i < 9; i++) x_data[i] = (float)(i+1);  // 1..9
+
+    int64_t w_shape[4] = {1, 1, 2, 2};
+    Tensor* W = tensor_create(4, w_shape, FLOAT32, CPU);
+    float* w_data = (float*)W->data;
+    for (int i = 0; i < 4; i++) w_data[i] = 1.0f;
+
+    int64_t b_shape[1] = {1};
+    Tensor* b = tensor_create(1, b_shape, FLOAT32, CPU);
+    float* b_data = (float*)b->data;
+    b_data[0] = 0.0f;
+
+    // --- Layer setup ---
+    Layer layer;
+    layer.weights = (Tensor**)malloc(2*sizeof(Tensor*));
+    layer.weights[0] = W;
+    layer.weights[1] = b;
+    layer.n_weights = 2;
+    layer.input = NULL;
+    layer.output = NULL;
+    layer.grad_input = NULL;
+    layer.forward = conv2d_layer_forward;
+    layer.backward = conv2d_layer_backward; // GPU backward
+
+    // Forward pass on CPU to set layer.input
+    layer.forward(&layer, input);
+
+    // Gradient w.r.t output: ones
+    Tensor* grad_output = tensor_create(4, layer.output->shape, FLOAT32, CPU);
+    tensor_fill(grad_output, 1.0f);
+
+    // Move tensors to GPU
+    Tensor* input_gpu = tensor_to_cuda(input);
+    Tensor* W_gpu     = tensor_to_cuda(W);
+    Tensor* b_gpu     = tensor_to_cuda(b);
+    Tensor* grad_output_gpu = tensor_to_cuda(grad_output);
+
+    // Update layer to use GPU tensors
+    layer.input = input_gpu;
+    layer.weights[0] = W_gpu;
+    layer.weights[1] = b_gpu;
+
+    // Backward on GPU
+    layer.backward(&layer, grad_output_gpu);
+
+    // Copy grad_input back to CPU
+    layer.grad_input = tensor_to_cpu(layer.grad_input);
+    W->grad = tensor_to_cpu(W_gpu->grad);
+    if (b && b->grad) b->grad = tensor_to_cpu(b_gpu->grad);
+
+    // Print grad_input
+    printf("\ngrad_input (GPU -> CPU):\n");
+    tensor_print(layer.grad_input);
+
+    // Validate grad_input
+    float expected_grad_input[9] = {1,2,1, 2,4,2, 1,2,1};
+    float* gx = (float*)layer.grad_input->data;
+    for (int i = 0; i < 9; i++) assert(gx[i] == expected_grad_input[i]);
+
+    // Print grad_weight
+    printf("\ngrad_weight (GPU -> CPU):\n");
+    tensor_print(W->grad);
+    float expected_grad_weight[4] = {12,16,24,28};
+    float* gw = (float*)W->grad->data;
+    for (int i = 0; i < 4; i++) assert(gw[i] == expected_grad_weight[i]);
+
+    // Print grad_bias
+    if (b && b->grad) {
+        printf("\ngrad_bias (GPU -> CPU):\n");
+        tensor_print(b->grad);
+        assert(((float*)b->grad->data)[0] == 4.0f);
+    }
+
+    printf("\nAssertions passed: GPU Conv2D backward gradients are correct!\n");
+
+    // Cleanup
+    tensor_free(input);
+    tensor_free(W);
+    tensor_free(b);
+    tensor_free(layer.output);
+    tensor_free(layer.grad_input);
+    tensor_free(grad_output);
+    tensor_free(input_gpu);
+    tensor_free(W_gpu);
+    tensor_free(b_gpu);
+    tensor_free(grad_output_gpu);
+    free(layer.weights);
+}
+
+void demo_maxpool2d_forward_cpu() {
+    printf("\n=== CPU MaxPool2D forward Demo ===\n");
+
+    // Input: N=1, C=1, H=W=4
+    int64_t shape[4] = {1,1,4,4};
+    Tensor* input = tensor_create(4, shape, FLOAT32, CPU);
+    float* x = (float*)input->data;
+
+    // Fill input: 1..16
+    for (int i = 0; i < 16; i++) x[i] = (float)(i+1);
+
+    Layer layer;
+    layer.input = NULL;
+    layer.output = NULL;
+    layer.grad_input = NULL;
+    layer.weights = NULL;
+    layer.n_weights = 0;
+    layer.forward = maxpool2d_layer_forward_cpu;
+    layer.backward = NULL;
+
+    // Forward
+    layer.forward(&layer, input);
+
+    printf("MaxPool2D forward output (CPU):\n");
+    tensor_print(layer.output);
+
+    // Expected output: max of each 2x2 window
+    float expected[4] = {6,8,14,16};
+    float* y = (float*)layer.output->data;
+    for (int i = 0; i < 4; i++) assert(y[i] == expected[i]);
+
+    printf("Assertion passed: MaxPool2D forward output is correct!\n");
+
+    tensor_free(input);
+    tensor_free(layer.output);
+}
+
+void demo_maxpool2d_backward_cpu() {
+    printf("\n=== CPU MaxPool2D backward Demo ===\n");
+
+    // Input: 1x1x4x4
+    int64_t shape[4] = {1,1,4,4};
+    Tensor* input = tensor_create(4, shape, FLOAT32, CPU);
+    float* x = (float*)input->data;
+    for (int i = 0; i < 16; i++) x[i] = (float)(i+1);
+
+    Layer layer;
+    layer.input = NULL;
+    layer.output = NULL;
+    layer.grad_input = NULL;
+    layer.weights = NULL;
+    layer.n_weights = 0;
+    layer.forward = maxpool2d_layer_forward;
+    layer.backward = maxpool2d_layer_backward;
+
+    layer.forward(&layer, input);
+
+    // grad_output: all ones
+    Tensor* grad_output = tensor_create(4, layer.output->shape, FLOAT32, CPU);
+    tensor_fill(grad_output, 1.0f);
+
+    layer.backward(&layer, grad_output);
+
+    printf("MaxPool2D backward grad_input (CPU):\n");
+    tensor_print(layer.grad_input);
+
+    // Expected grad_input: 1 in max positions, 0 elsewhere
+    float expected[16] = {
+        0,0,0,0,
+        0,1,0,1,
+        0,0,0,0,
+        0,1,0,1
+    };
+    float* gx = (float*)layer.grad_input->data;
+    for (int i = 0; i < 16; i++) assert(gx[i] == expected[i]);
+
+    printf("Assertion passed: MaxPool2D backward grad_input is correct!\n");
+
+    tensor_free(input);
+    tensor_free(layer.output);
+    tensor_free(layer.grad_input);
+    tensor_free(grad_output);
+}
+
+void demo_maxpool2d_backward_gpu() {
+    printf("\n=== GPU MaxPool2D backward Demo (CPU style) ===\n");
+
+    // Input: 1x1x4x4
+    int64_t shape[4] = {1,1,4,4};
+    Tensor* input = tensor_create(4, shape, FLOAT32, CPU);
+    float* x = (float*)input->data;
+    for (int i = 0; i < 16; i++) x[i] = (float)(i+1);
+
+    Layer layer;
+    layer.input = NULL;
+    layer.output = NULL;
+    layer.grad_input = NULL;
+    layer.weights = NULL;
+    layer.n_weights = 0;
+    layer.forward = maxpool2d_layer_forward;   // dispatches CPU/GPU internally
+    layer.backward = maxpool2d_layer_backward;
+
+    // ---- Forward (CPU) ----
+    layer.forward(&layer, input);
+
+    // grad_output: all ones
+    Tensor* grad_output = tensor_create(4, layer.output->shape, FLOAT32, CPU);
+    tensor_fill(grad_output, 1.0f);
+
+    // ---- Move tensors to GPU ----
+    layer.input = tensor_to_cuda(layer.input);
+    layer.output = tensor_to_cuda(layer.output);
+    grad_output = tensor_to_cuda(grad_output);
+
+    // ---- Backward (GPU) ----
+    layer.backward(&layer, grad_output);
+
+    // ---- Bring grad_input back to CPU ----
+    layer.grad_input = tensor_to_cpu(layer.grad_input);
+
+    printf("MaxPool2D backward grad_input (GPU -> CPU):\n");
+    tensor_print(layer.grad_input);
+
+    // Expected grad_input: 1 at max positions
+    float expected[16] = {
+        0,0,0,0,
+        0,1,0,1,
+        0,0,0,0,
+        0,1,0,1
+    };
+    float* gx = (float*)layer.grad_input->data;
+    for (int i = 0; i < 16; i++) {
+        assert(gx[i] == expected[i]);
+    }
+
+    printf("Assertions passed: GPU MaxPool2D backward is correct!\n");
+
+    // Cleanup
+    tensor_free(input);
+    tensor_free(layer.output);
+    tensor_free(layer.grad_input);
+    tensor_free(grad_output);
+}
+
+
+void demo_cnn_forward_backward() {
+    Device dev = CPU;
+
+    // Input: N=1, C=1, H=W=4
+    int64_t shape[4] = {1,1,4,4};
+    Tensor* input = tensor_create(4, shape, FLOAT32, dev);
+    float* x = (float*)input->data;
+    for (int i = 0; i < 16; i++) x[i] = (float)(i+1); // 1..16
+
+    CNNConfig cfg = {
+        .input_channels = 1,
+        .input_height = 4,
+        .input_width = 4,
+        .conv1_out_channels = 1,
+        .conv1_kernel_h = 2,
+        .conv1_kernel_w = 2,
+        .conv2_out_channels = 1,
+        .conv2_kernel_h = 1,
+        .conv2_kernel_w = 1,
+        .linear_out_features = 6
+    };
+
+    Network* net = create_cnn(dev, &cfg);
+
+    printf("\n=== CNN Forward ===\n");
+    Tensor* out = network_forward(net, input, true);
+
+    printf("\nCNN output:\n");
+    tensor_print(out);
+
+    // Create grad_output same shape as final output
+    Tensor* grad_output = tensor_create(out->ndim, out->shape, FLOAT32, dev);
+    tensor_fill(grad_output, 1.0f);
+
+    printf("\n=== CNN Backward ===\n");
+    network_backward(net, grad_output, true);
+
+    // Cleanup
+    tensor_free(input);
+    tensor_free(grad_output);
+    tensor_free(out);
+    free(net->layers);
+    free(net);
+}
+
+void demo_cnn_forward_backward_gpu() {
+    Device dev = CUDA;
+
+    // Input: N=1, C=1, H=W=4 (created on CPU first)
+    int64_t shape[4] = {1,1,4,4};
+    Tensor* input = tensor_create(4, shape, FLOAT32, CPU);
+    float* x = (float*)input->data;
+    for (int i = 0; i < 16; i++) x[i] = (float)(i+1);
+
+    CNNConfig cfg = {
+        .input_channels = 1,
+        .input_height = 4,
+        .input_width = 4,
+        .conv1_out_channels = 1,
+        .conv1_kernel_h = 2,
+        .conv1_kernel_w = 2,
+        .conv2_out_channels = 1,
+        .conv2_kernel_h = 1,
+        .conv2_kernel_w = 1,
+        .linear_out_features = 6
+    };
+
+    Network* net = create_cnn(dev, &cfg);
+
+    // Move input to GPU
+    input = tensor_to_cuda(input);
+
+    printf("\n=== CNN Forward (GPU) ===\n");
+    Tensor* out = network_forward(net, input, true);
+
+    // Bring output back to CPU for printing
+    Tensor* out_cpu = tensor_to_cpu(out);
+
+    printf("\nCNN output (GPU -> CPU):\n");
+    tensor_print(out_cpu);
+
+    // grad_output on CPU → GPU
+    Tensor* grad_output = tensor_create(out_cpu->ndim, out_cpu->shape, FLOAT32, CPU);
+    tensor_fill(grad_output, 1.0f);
+    grad_output = tensor_to_cuda(grad_output);
+
+    printf("\n=== CNN Backward (GPU) ===\n");
+    network_backward(net, grad_output, true);
+
+    printf("\nCNN backward pass complete (GPU)\n");
+
+    // Cleanup
+    tensor_free(input);
+    tensor_free(grad_output);
+    tensor_free(out);
+    tensor_free(out_cpu);
+    free(net->layers);
+    free(net);
+}
+
+
+void demo_cnn_forward_backward_large() {
+    Device dev = CPU;
+
+    // Input: 64x64, 3 channels
+    int64_t shape[4] = {1, 3, 64, 64};
+    Tensor* input = tensor_create(4, shape, FLOAT32, dev);
+    float* x = (float*)input->data;
+    for (int i = 0; i < 1*3*64*64; i++) x[i] = (float)(i % 256) / 255.0f;
+
+    CNNConfig cfg = {
+        .input_channels = 3,
+        .input_height = 64,
+        .input_width = 64,
+        .conv1_out_channels = 16,
+        .conv1_kernel_h = 3,
+        .conv1_kernel_w = 3,
+        .conv2_out_channels = 32,
+        .conv2_kernel_h = 3,
+        .conv2_kernel_w = 3,
+        .linear_out_features = 10
+    };
+
+    Network* net = create_cnn(dev, &cfg);
+
+    printf("\n=== CNN Forward ===\n");
+    Tensor* out = network_forward(net, input, true);
+    printf("\nCNN output:\n");
+    tensor_print(out);
+
+    Tensor* grad_output = tensor_create(out->ndim, out->shape, FLOAT32, dev);
+    tensor_fill(grad_output, 1.0f);
+
+    printf("\n=== CNN Backward ===\n");
+    network_backward(net, grad_output, true);
+
+    // Cleanup
+    tensor_free(input);
+    tensor_free(grad_output);
+    tensor_free(out);
+    free(net->layers);
+    free(net);
+}
+
 
 int main() {
-    demo_cpu();
-    demo_gpu();
-    demo_relu_forward_cpu();
-    demo_relu_forward_backward_loop(100);
-    demo_linear_forward_backward_loop(1);
-    demo_gpu_large();
-    demo_transfers();
-    demo_add_bias_gpu();
-    demo_add_bias_cpu();
-    demo_mlp_cpu();
-    demo_mlp_and_train_cpu();
-    demo_mlp_gpu();
-    demo_mlp_and_train_gpu();
-    demo_tensor_create_as();
-    demo_tensor_slice();
-    demo_tensor_copy_slice();
-    demo_reshape();
-    demo_metrics();
-    demo_concat();
-    demo_concat();
-    demo_metrics_concat();
-    demo_argmax_dim1();
-    demo_metrics_simple();
-    demo_metrics_gpu();
+    // demo_cpu();
+    // demo_gpu();
+    // demo_relu_forward_cpu();
+    // demo_relu_forward_backward_loop(100);
+    // demo_linear_forward_backward_loop(1);
+    // demo_gpu_large();
+    // demo_transfers();
+    // demo_add_bias_gpu();
+    // demo_add_bias_cpu();
+    // demo_mlp_cpu();
+    // demo_mlp_and_train_cpu();
+    // demo_mlp_gpu();
+    // demo_mlp_and_train_gpu();
+    // demo_tensor_create_as();
+    // demo_tensor_slice();
+    // demo_tensor_copy_slice();
+    // demo_reshape();
+    // demo_metrics();
+    // demo_concat();
+    // demo_concat();
+    // demo_metrics_concat();
+    // demo_argmax_dim1();
+    // demo_metrics_simple();
+    // demo_metrics_gpu();
+
+    // demo_conv2d_forward_cpu();
+    // demo_conv2d_backward_cpu();
+
+    // demo_conv2d_backward_gpu();
+    // demo_maxpool2d_backward_gpu();
+
+    // demo_maxpool2d_forward_cpu();
+    // demo_maxpool2d_backward_cpu();
+    
+    demo_cnn_forward_backward();
+    //demo_cnn_forward_backward_large();
+    demo_cnn_forward_backward_gpu();
+    
     return 0;
 }

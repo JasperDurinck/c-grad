@@ -123,7 +123,7 @@ Tensor* tensor_slice(const Tensor* src, int index) {
         case CUDA:
             return tensor_slice_cuda(src, index);
         default:
-            fprintf(stderr, "tensor_slice: unknown device\n");
+            fprintf(stderr, "tensor_slice: unknown device \n");
             exit(1);
     }
 }

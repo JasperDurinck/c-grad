@@ -13,17 +13,19 @@ extern "C" {
 typedef enum { FLOAT32, FLOAT16, BFLOAT16, INT32, INT64 } TensorType;
 typedef enum { CPU, CUDA } Device;
 
-typedef struct Tensor {
+typedef struct Tensor Tensor;
+
+struct Tensor {
     void*       data;
-    void*       grad;
+    Tensor*     grad;   
     int         ndim;
     int64_t     shape[MAX_DIMS];
     int64_t     stride[MAX_DIMS];
     TensorType  dtype;
     Device      device;
     int         requires_grad;
-    int is_view;  // (1 == does NOT own data)
-} Tensor;
+    int         is_view;    // 1 == does NOT own data
+};
 
 
 size_t dtype_size(TensorType dtype);
