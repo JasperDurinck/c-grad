@@ -253,7 +253,7 @@ Tensor* tensor_argmax_dim1(const Tensor* src) {
             break;
         default:
             fprintf(stderr, "tensor_argmax: unsupported device\n");
-            exit(1);
+            break;
     }
 }
 
@@ -267,7 +267,7 @@ void tensor_max(const Tensor* a, Tensor* out) {
             break;
         default:
             fprintf(stderr, "tensor_max: unsupported device\n");
-            exit(1);
+            break;
     }
 }
 

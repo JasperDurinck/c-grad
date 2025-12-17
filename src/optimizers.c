@@ -42,7 +42,7 @@ void sgd_update_optimizer(Optimizer* opt, float lr) {
             break;
         default:
             fprintf(stderr, "sgd_update_optimizer: unsupported device\n");
-            exit(1);
+            break;
     }
 }
 

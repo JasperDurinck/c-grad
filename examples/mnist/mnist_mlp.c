@@ -15,14 +15,25 @@
 
 void main() {
 
-    Dataset* mnist = create_mnist_dataset(
+    //TODO improve speed, copying to device is slow, simple example for now
+
+    Dataset* train_mnist = create_mnist_dataset(
         "/home/pc/code/c-grad/examples/mnist/data/MNIST/raw/train-images-idx3-ubyte", 
         "/home/pc/code/c-grad/examples/mnist/data/MNIST/raw/train-labels-idx1-ubyte"
     );
 
-    DataLoader* loader = dataloader_create(mnist, 64, 1);
+    Dataset* test_mnist = create_mnist_dataset(
+        "/home/pc/code/c-grad/examples/mnist/data/MNIST/raw/t10k-images-idx3-ubyte", 
+        "/home/pc/code/c-grad/examples/mnist/data/MNIST/raw/t10k-labels-idx1-ubyte"
+    );
+
+
+    DataLoader* train_loader = dataloader_create(train_mnist, 64, 1);
+    DataLoader* test_loader = dataloader_create(test_mnist, 64, 1);
+
 
     Network* net = create_mlp(28*28, 256, 10, 1, CUDA);
+
 
     Optimizer opt = {
         .layers = net->layers,
@@ -34,22 +45,26 @@ void main() {
     int epochs = 10;
     float lr = 0.01f;
 
-    int64_t n_samples = 60000;
 
     for (int epoch = 1; epoch <= epochs; epoch++) {
-        dataloader_reset(loader);
+        dataloader_reset(train_loader);
+        dataloader_reset(test_loader);
 
         Tensor *X, *Y;
-        float total_loss = 0;
-        int batches = 0;
-
-        // pre allocate tensors for all predictions and labels
-        Tensor* all_preds = tensor_create(2, (int64_t[]){n_samples, 10}, FLOAT32, CPU);
-        Tensor* all_labels = tensor_create(1, (int64_t[]){n_samples}, INT64, CPU);
+        float train_total_loss = 0;
+        int train_batches = 0;
 
         int offset = 0; // position in the pre allocated tensors
 
-        while (dataloader_next(loader, &X, &Y)) {
+        int64_t n_samples = 10000;
+        Tensor* all_preds = tensor_create(2, (int64_t[]){n_samples, 10}, FLOAT32, CPU);
+        Tensor* all_labels = tensor_create(1, (int64_t[]){n_samples}, INT64, CPU);
+
+        int offset_test = 0; // position in the pre allocated tensors
+        float test_total_loss = 0;
+        int test_batches = 0;
+
+        while (dataloader_next(train_loader, &X, &Y)) {
 
             int batch_size = X->shape[0];
 
@@ -67,26 +82,52 @@ void main() {
             network_backward(net, grad_out, 0);
             optimizer_step(&opt, lr);
 
-            total_loss += loss;
-            batches++;
+            train_total_loss += loss;
+            train_batches++;
 
-            // copy batch predictions and labels into pre-allocated tensors
+            offset += batch_size;
+
+            tensor_free(X);
+            tensor_free(Y);
+            tensor_free(X_flat);
+            tensor_free(grad_out);
+            tensor_free(Y_dev);
+        }
+        
+        while (dataloader_next(test_loader, &X, &Y)) {
+
+            int batch_size = X->shape[0];
+
+            // reshape X to (batch, 784)
+            Tensor* X_flat = tensor_reshape(X, 2, (int64_t[]){batch_size, 28*28});
+            Tensor* X_flat_dev = tensor_to_cuda(X_flat);
+
+            Tensor* logits = network_forward(net, X_flat_dev, 0);
+
+            Tensor* grad_out = tensor_create_as(logits);
+            Tensor* Y_dev = tensor_to_cuda(Y);
+
+            float loss = cross_entropy_loss(logits, Y_dev, grad_out);
+
+            test_total_loss += loss;
+            test_batches++;
+
             Tensor* logits_cpu = tensor_to_cpu(logits);
             Tensor* Y_cpu = tensor_to_cpu(Y);
 
             for (int i = 0; i < batch_size; i++) {
-                // Copy logits as floats (ok)
-                memcpy((float*)all_preds->data + (offset + i) * 10,
+                // copy logits as floats
+                memcpy((float*)all_preds->data + (offset_test + i) * 10,
                     (float*)logits_cpu->data + i * 10,
                     10 * sizeof(float));
 
-                // Copy labels safely depending on type
+                // copy labels safely depending on type
                 if (Y_cpu->dtype == FLOAT32 && all_labels->dtype == FLOAT32) {
-                    ((float*)all_labels->data)[offset + i] = ((float*)Y_cpu->data)[i];
+                    ((float*)all_labels->data)[offset_test + i] = ((float*)Y_cpu->data)[i];
                 } else if (Y_cpu->dtype == INT64 && all_labels->dtype == INT64) {
-                    ((int64_t*)all_labels->data)[offset + i] = ((int64_t*)Y_cpu->data)[i];
+                    ((int64_t*)all_labels->data)[offset_test + i] = ((int64_t*)Y_cpu->data)[i];
                 } else if (Y_cpu->dtype == INT32 && all_labels->dtype == INT32) {
-                    ((int32_t*)all_labels->data)[offset + i] = ((int32_t*)Y_cpu->data)[i];
+                    ((int32_t*)all_labels->data)[offset_test + i] = ((int32_t*)Y_cpu->data)[i];
                 } else {
                     fprintf(stderr, "Unsupported label dtype combination: Y_cpu=%d, all_labels=%d\n",
                             Y_cpu->dtype, all_labels->dtype);
@@ -94,17 +135,10 @@ void main() {
                 }
             }
 
-            offset += batch_size;
+            offset_test += batch_size;
 
-            // printf("iteration\n");
-            // tensor_print(tensor_argmax_dim1(logits_cpu));
-            // tensor_print(Y_cpu);
-
-
-            // free temporary tensors
             tensor_free(X);
             tensor_free(Y);
-            tensor_free(X_flat);
             tensor_free(grad_out);
             tensor_free(Y_dev);
             tensor_free(Y_cpu);
@@ -116,8 +150,8 @@ void main() {
         float acc = accuracy(all_preds, all_labels);
         float mcc = mcc_mc_score(all_preds, all_labels, 10);
 
-        printf("Epoch %d | Loss = %.4f | Accuracy = %.4f | MCC = %.4f\n",
-               epoch, total_loss / batches, acc, mcc);
+        printf("Epoch %d | Train Loss = %.4f | Test Loss = %.4f | Accuracy = %.4f | MCC = %.4f\n",
+               epoch, train_total_loss / train_batches, test_total_loss / test_batches, acc, mcc);
 
         tensor_free(all_preds);
         tensor_free(all_labels);

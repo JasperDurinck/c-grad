@@ -25,11 +25,6 @@ typedef struct Layer {
 } Layer;
 
 // Linear FF
-
-void linear_layer_fn_cpu(Layer* layer, Tensor* input);
-void linear_layer_fn_grad_cpu(Layer* layer, Tensor* grad_output);
-Layer* create_linear_layer_cpu(int in_features, int out_features, Device dev);
-
 void linear_layer_forward(Layer* layer, Tensor* input);
 void linear_layer_backward(Layer* layer, Tensor* grad_output);
 Layer* create_linear_layer(int in_features, int out_features, Device dev);

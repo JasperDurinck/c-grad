@@ -7,3 +7,4 @@
 *.vscode/
 
 /examples/mnist/data
+/examples/mnist/pytorch
